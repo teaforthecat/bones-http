@@ -6,6 +6,7 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [bones.conf "0.1.3"]
                  [yada "1.1.0-20160219.181822-27"]
+                 [buddy/buddy-auth "0.8.1"]
                  [buddy/buddy-hashers "0.9.1"]]
 
   :profiles {:test

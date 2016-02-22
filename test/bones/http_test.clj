@@ -29,7 +29,7 @@
 (use-fixtures :once create-users)
 
 (deftest login
-  (let [handler  (yada (login-resource :bones.http.db/authenticate-user))]
+  (let [handler (yada (login-resource :bones.http.db/authenticate-user))]
     (testing "post with form params returns edn"
       (let [request (mock/request :post x {:username "admin" :password "secret"})
             response @(handler request)]
@@ -47,3 +47,30 @@
     (testing "invalid credentials returns 401"
       (let [response @(handler (mock/request :post x {:username "tom" :password "invalid"}))]
         (m/is (m/= 401) (:status response))))))
+
+(defn edn-request [req]
+  (update req :headers assoc "content-type" "application/edn"))
+
+(defn authenticated-request [req]
+  (-> req
+      (edn-request)
+      (update :headers assoc token-name "eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.6NWNdVYv5L2sM0PBYCl3X85ZemRfBk9X.gwQHFsX8XTgkJO7L.dmS7IPBnlTeOSG7-wfM-NZi19ilM2MJnwU64af5NBi7RN10DhUjOpkTBMGhQS7uCim-srw.LXdQpPY5WwFKTHOM3RkqDw")))
+
+(deftest command
+  (let [handler (yada (command-resource))]
+    (testing "accepts application/edn content-type"
+      (let [request (mock/request :post x (print-str {:command_type :a :message {:somethig 123}}))
+            response @(handler (authenticated-request request))]
+        (m/is (m/= 200) (:status response))
+        )))
+
+    (testing "does not accept form-encoded content-type"
+      (let [request (mock/request :post x {:command_type :a :message {:somethig 123}})
+            response @(handler request)]
+        (m/is (m/= 415) (:status response))
+        ))
+    (testing "requires authentication"
+      (let [request (mock/request :post x (print-str {:command_type :a :message {:somethig 123}}))
+            response @(handler (update request :headers assoc "content-type" "application/edn"))]
+        (m/is (m/= 403) (:status response))))
+    ))
