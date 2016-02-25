@@ -1,6 +1,11 @@
 (ns bones.http
   (:require [bones.http.db :as db]
-            [yada.yada :refer [resource]]
+            [bones.http.kafka :as kafka]
+            [bones.http.system :as system]
+            [bones.conf :as conf]
+            [bidi.ring :refer (make-handler)]
+            [yada.yada :refer [resource yada]]
+            [yada.swagger :refer [swaggered]]
             [yada.security :refer [verify]]
             [schema.core :as s :refer [defschema]]
             [clj-time.core :as time]
@@ -15,8 +20,6 @@
 (defonce token-name "X-Auth-Token")
 (defonce secret (nonce/random-bytes 32))
 (defonce algorithm {:alg :a256kw :enc :a128gcm})
-(def auth-backend (jwe-backend {:secret secret :options algorithm}))
-(def cookie-session-backend (session-backend))
 
 
 (defn resolve-fn [sym]
@@ -24,6 +27,9 @@
         fn (symbol (name sym))]
     (ns-resolve space fn)))
 
+
+(defn create-token [data]
+  (jwe/encrypt data secret algorithm))
 
 (defn make-login-handler
   "Accepts a function to use to both check password and retreive user data.
@@ -36,7 +42,7 @@
         (let [claims {:user user-data
                       ;; todo: consider other options for expiration
                       :exp (time/plus (time/now) (time/hours 1))}
-              token (jwe/encrypt claims secret algorithm)
+              token (create-token claims)
               session (jws/sign user-data secret)]
           (-> (:response ctx)
               (assoc :cookies {"session" {:value session}})
@@ -71,7 +77,7 @@
   (let [user-data (verify-token (:request ctx))
         command (get-in ctx [:parameters :body])]
     (if user-data
-      ;;      (kafka/produce command)
+      ;; (kafka/produce command)
       "hello"
       (-> (:response ctx)
           (assoc :status 403)
@@ -83,15 +89,9 @@
 
 (defn command-resource []
   (resource {:methods {:post {:consumes ["application/edn"]
-                              :produces ["application/edn"]
+                              :produces ["application/edn" "application/json"]
                               :parameters {:body Command}
-                              :response command-handler}}
-             ;; this isn't being used because I couldn't get it working
-             ;; I left it here in case it generates swagger docs
-             ;; :access-control {:scheme :token
-             ;;                  :verify verify-token}}
-             }
-            ))
+                              :response command-handler}}}))
 
 ;; todo make/find datalog schema
 (defschema Query {:q [s/Any]})
@@ -107,8 +107,39 @@
   (resource {:methods {:get {:response "hello"}}}))
 
 (defn cqrs [{:keys [:bones.http/mount-point :bones.http/auth-fn]}]
-  [(or mount-point "/api")
-   (if auth-fn ["login" (login-resource auth-fn)])
-   ["command" (command-resource)]
-   ["query" (query-resource)]
-   ["events" (events-resource)]])
+  [(or mount-point "/api/")
+   (swaggered
+    ;; (if auth-fn ["login" (yada (login-resource auth-fn))])
+    ["command" (yada (command-resource))]
+    ;; ["query" (yada (query-resource))]
+    ;; ["events" (yada (events-resource))]
+    {:info {:title "Hello World!"
+            :version "1.0"
+            :description "A greetings service"}
+     :basePath "/api/"})])
+
+(defn start-server [conf]
+  (let [handler (-> {:bones.http/auth-fn :bones.http.db/authenticate-user}
+                    (cqrs)
+                    (make-handler))
+        sys (system/system {:config-files ["test.edn"]
+                            :http/handler handler
+                            :http/port 3000})]
+    (system/start-system sys :conf :http)
+    sys))
+
+(comment
+
+  (def system (start-server {}))
+
+  (system/stop-system system :conf :http)
+
+  (let [handler (-> {:bones.http/auth-fn :bones.http.db/authenticate-user}
+                    (cqrs)
+                    (make-handler)
+                    )]
+    (system/system {:config-files ["test.edn"]
+                               :http/handler handler})
+    )
+
+  )

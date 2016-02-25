@@ -5,8 +5,8 @@
 
 
 (defonce algorithm {:alg :bcrypt+blake2b-512})
-(def schema {})
-(def conn (d/create-conn schema))
+(defonce schema {})
+(defonce conn (d/create-conn schema))
 
 (defn create-user [{:keys [username password roles]}]
   (let [enc-pass (hashers/encrypt password algorithm)
