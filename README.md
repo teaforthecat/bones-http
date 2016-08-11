@@ -30,7 +30,7 @@ Once it was started, the system went on to reach out to the web.
 The web had a lot to say
 
 ```sh
-curl localhost:8080/api/command -D '{:twitter "words, some news"}' -H
+curl localhost:8080/api/command -X POST -D '{:twitter "words, some news"}' -H
 "Content-Type: application/edn"
 ```
 
