@@ -6,7 +6,7 @@
 
 
 (s/defschema HttpConf
-  {:http/handler s/Any
+  {:http/handler-fn s/Any
    :http/port s/Int
    s/Any s/Any})
 
@@ -19,8 +19,9 @@
       (do
         (println "server is running on port: " (:port cmp))
         cmp)
-      (let [{:keys [:http/handler :http/port]} conf
-            server (start-server handler {:port port})]
+      (let [{:keys [:http/handler-fn :http/port]} conf
+            ;; builds a handler each start
+            server (start-server (handler-fn conf) {:port port})]
         (-> cmp
          (assoc :server server)
          ;; in case port is nil, get real port
