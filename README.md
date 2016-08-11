@@ -90,13 +90,21 @@ And reported back various findings
 
 ```clojure
 (defn report-findings [args req]
-  [{:various "findings"}])
-(http/register-query-handler ::report-findings {:places [s/Str] (s/optional-key :todos) (s/enum
+  (find-findings args))
+(http/register-query-handler ::report-findings {:place s/Str (s/optional-key :todos) (s/enum
 "new" "done")})
 ```
-And all were learned and glad
+
+The web had many questions
+
 ```sh
-200 [{:various "findings"}]
+curl localhost:8080/api/query?place=canada&todos=new -X GET
+```
+
+And learned many things
+
+```sh
+200 [{:todos ["fishing"]}]
 ```
 
 ## License
