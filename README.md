@@ -47,7 +47,7 @@ The system learned of people on the web.
 ```clojure
 (require '[schema.core :as s]
 (defn i-know-you [args req]
-  (if (= (:username args) (:password args))
+  (if (= (:username args) (:password args)) ; database call goes here
     {:you-must-be-twins "do you have any requests?"}))
 (http/register-command :login {:username s/Str :password s/Str} ::i-know-you)
 ```
@@ -138,6 +138,7 @@ curl "localhost:8080/api/query?place=texas&todos=new" -H "Authorization: Token $
 ```
 
 And learned many things.
+
 _there is no database here, we're just echoing back the args_
 ```sh
 {:place "texas", :todos "new"}
