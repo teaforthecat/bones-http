@@ -57,8 +57,8 @@ cookie and token. Access it on the request (the second argument) like so `(:iden
 The web complied.
 
 ```sh
-curl localhost:8080/api/login -X POST -d '{:command :login :args \
-  {:username "same" :password "same"}}' \
+curl localhost:8080/api/login -X POST \
+  -d '{:command :login :args {:username "same" :password "same"}}' \
   -H "Content-Type: application/edn" -i
 ```
 
@@ -98,8 +98,8 @@ The system tried to understand what the web wanted.
 The web gave the system a command.
 
 ```sh
-curl localhost:8080/api/command -d '{:command :todo :args \
-  {:status "new" :text "travel to distant lands"}}' \
+curl localhost:8080/api/command \
+  -d '{:command :todo :args {:status "new" :text "travel to distant lands"}}' \
   -H "Authorization: Token $TOKEN" -H "Content-Type: application/edn"
 ```
 
@@ -113,8 +113,8 @@ HTTP/1.1 400 Bad Request
 The web was persistant, and gave the missing information.
 
 ```sh
-curl localhost:8080/api/command -d '{:command :todo :args \
-  {:status "new" :text "travel to distant lands" :place "texas"}}' \
+curl localhost:8080/api/command \
+  -d '{:command :todo :args {:status "new" :text "travel to distant lands" :place "texas"}}' \
   -H "Authorization: Token $TOKEN" -H "Content-Type: application/edn"
 ```
 
@@ -122,7 +122,7 @@ Eventually the system came around.
 
 ```sh
 200 OK
-{:status "new", :text "travel to distant lands", \
+{:status "new", :text "travel to distant lands",
  :place "texas", :user-info {:you-must-be-twins "do you have any requests?"}
 }
 ```
