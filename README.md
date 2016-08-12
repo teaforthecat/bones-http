@@ -44,6 +44,8 @@ HTTP/1.1 401 Unauthorized
 
 The system learned of people on the web.
 
+_The return value of the login command will be encrypted in both the session
+cookie and token. Access it on the request (the second argument) like so `(:identity req)`_
 ```clojure
 (require '[schema.core :as s]
 (defn i-know-you [args req]
@@ -87,7 +89,7 @@ The system tried to understand what the web wanted.
 ```clojure
 (def record-todo #'identity) ; database call goes here
 (defn todo [args req]
-  (record-todo args :user-info (:identity req)))
+  (record-todo (assoc args :user-info (:identity req))))
 (http/register-command :todo {:status (s/enum "new" "done") :text s/Str :place s/Str})
 ```
 
@@ -116,7 +118,8 @@ Eventually the system came around.
 
 ```sh
 200 OK
-```
+{:status "new", :text "travel to distant lands", :place "texas", :user-info {:you-must-be-twins "do you have any requests?"}
+}```
 
 And the system was deployed to distant lands.
 ...
