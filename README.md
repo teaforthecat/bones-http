@@ -29,20 +29,20 @@ Once it was started, the system went on to reach out to the web.
 (http/start-system sys)
 ```
 
-The web had a lot to say
+The web had a lot to say.
 
 ```sh
 curl localhost:8080/api/command -X POST -d '{:twitter "words, some news"}' -H
 "Content-Type: application/edn"
 ```
 
-But the system did not even
+But the system did not even.
 
 ```sh
 HTTP/1.1 401 Unauthorized
 ```
 
-The system learned of people on the web
+The system learned of people on the web.
 
 ```clojure
 (require '[schema.core :as s]
@@ -52,14 +52,16 @@ The system learned of people on the web
 (http/register-command :login {:username s/Str :password s/Str} ::i-know-you)
 ```
 
-The web complied
+The web complied.
 
 ```sh
 curl localhost:8080/api/login -X POST -d '{:command :login :args {:username "same" :password "same"}}' -H "Content-Type: application/edn" -i
 ```
 
-And they became friends for a maximum of one year
+And they became friends for a maximum of one year.
 
+_Notice both a session cookie and token are returned. This response can be used by both
+the browser and api clients._
 ```sh
 
 HTTP/1.1 200 OK
@@ -75,11 +77,12 @@ Server: Jetty(9.3.8.v20160314)
 
 {:token "eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.vOdZGyjQqsXL89x4StgQuyk28jPaJ-ji.3DcYJLZUbkXvXzPk.jvfS1FeuL4DkNDJIHvQEl8rvSzKKV7US_8Zqybda_cX5a-CpXMGOk_DX4c2ppXfPSA.za5U1C_HBonfezfe4dE2vg"}
 ```
+
 ```sh
 export TOKEN="eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.vOdZGyjQqsXL89x4StgQuyk28jPaJ-ji.3DcYJLZUbkXvXzPk.jvfS1FeuL4DkNDJIHvQEl8rvSzKKV7US_8Zqybda_cX5a-CpXMGOk_DX4c2ppXfPSA.za5U1C_HBonfezfe4dE2vg"
 ```
 
-The system tried to understand what the web wanted
+The system tried to understand what the web wanted.
 
 ```clojure
 (def record-todo #'identity) ; database call goes here
@@ -88,24 +91,37 @@ The system tried to understand what the web wanted
 (http/register-command :todo {:status (s/enum "new" "done") :text s/Str :place s/Str})
 ```
 
-The web was persistant
+The web gave the system a command.
+
+```sh
+curl localhost:8080/api/command -d '{:command :todo :args {:status "new" :text "travel to distant lands"}}' -H "Authorization: Token $TOKEN" -H "Content-Type: application/edn"
+```
+
+But the system needed more information.
+
+```sh
+HTTP/1.1 400 Bad Request
+{:message "args not valid", :data {:args {:place missing-required-key}}}
+```
+
+The web was persistant, and gave the missing information.
 
 ```sh
 curl localhost:8080/api/command -d '{:command :todo :args {:status "new" :text "travel to
-distant lands"}}' -H "Authorization: Token $TOKEN" -H "Content-Type:
+distant lands" :place "texas"}}' -H "Authorization: Token $TOKEN" -H "Content-Type:
 application/edn"
 ```
 
-Eventually the system came around
+Eventually the system came around.
 
 ```sh
 200 OK
 ```
 
-And the system was deployed to distant lands
+And the system was deployed to distant lands.
 ...
 
-And reported back various findings
+And reported back various findings.
 
 ```clojure
 (def find-findings #'identity) ;database call goes here
@@ -115,17 +131,20 @@ And reported back various findings
 "new" "done")})
 ```
 
-The web had many questions
+The web had many questions.
 
 ```sh
 curl "localhost:8080/api/query?place=texas&todos=new" -H "Authorization: Token $TOKEN" -H "Content-Type: application/edn"
 ```
 
-And learned many things
+And learned many things.
 _there is no database here, we're just echoing back the args_
 ```sh
 {:place "texas", :todos "new"}
 ```
+
+The end ... or is it?
+https://github.com/teaforthecat/bones
 
 ## License
 
