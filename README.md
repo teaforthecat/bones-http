@@ -132,6 +132,7 @@ And the system was deployed to distant lands.
 
 And reported back various findings.
 
+_only one query handler allowed_
 ```clojure
 (def find-findings #'identity) ;database call goes here
 (defn report-findings [args req]
