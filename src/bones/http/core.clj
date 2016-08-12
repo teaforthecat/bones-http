@@ -17,3 +17,7 @@
 (defn stop-system [sys]
   ;; http is the only component that needs to be stopped
   (service/stop-system sys :http))
+
+(def register-command #'handlers/register-command)
+(def register-commands #'handlers/register-commands)
+(def register-query-handler #'handlers/register-query-handler)
