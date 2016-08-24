@@ -12,7 +12,7 @@ library.
 
 ## Secret
 
-The secret must be 32 bytes.[^1] This is a restriction of buddy and,
+The secret must be 32 bytes**. This is a restriction of buddy and,
 probably, the encryption algorithm in use. To do this you can put it in an
 environment variable or a text file. A secret will be generated if you don't set
 it. You can also generate a value:
@@ -26,5 +26,5 @@ it. You can also generate a value:
      {:http.auth/secret "a 32 byte string, yes it is 32b."}
 
 
-[^1]: If you change the algorithm, (why would you do that?) you'll have to
+**: If you change the algorithm, (why would you do that?) you'll have to
     change the length of the secret.
