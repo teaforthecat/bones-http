@@ -64,8 +64,8 @@ curl localhost:8080/api/login -X POST \
 
 And they became friends for a maximum of one year.
 
-_Notice both a session cookie and token are returned. This response can be used by both
-the browser and api clients._
+_Note: Cookie authentication is not working currently, see_
+[issue #2](https://github.com/teaforthecat/bones.http/issues/2)
 ```sh
 
 HTTP/1.1 200 OK
