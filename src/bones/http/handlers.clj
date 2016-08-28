@@ -10,6 +10,7 @@
             [io.pedestal.http.ring-middlewares :as middlewares]
             [io.pedestal.http.content-negotiation :as cn]
             [io.pedestal.http.body-params :as body-params]
+            [io.pedestal.http.sse :as sse]
             [io.pedestal.interceptor.helpers :as helpers]
             [ring.util.response :as ring-resp]
             [bones.http.auth :as auth]))
@@ -195,6 +196,14 @@
   [ctx]
   (update-in ctx [:response] #(respond-with % "application/edn")))
 
+;; (defmethod render "text/event-stream"
+;;   [ctx]
+;;   (if (ms/source? (:response ctx))
+;;     (let [stream-ready-fn #((ms/connect (:response ctx)
+;;                                         (:response-channel ctx)))]
+;;       (sse/start-stream stream-ready-fn context heartbeat-delay bufferfn-or-n opts))
+;;     (throw (ex-info "source not given for text/event-stream" {:status 500}))))
+
 (def renderer
   (interceptor {:name :bones/renderer
                 :leave (fn [ctx] (render ctx))}))
@@ -287,6 +296,17 @@
                    ]
    'bones.http.handlers/query-handler])
 
+(defn event-stream-resource [conf shield event-stream-handler]
+  ;; need to use namespace so this can be called from a macro (defroutes)
+  [:bones/event-stream
+   ^:interceptors ['bones.http.handlers/error-responder              ; request ; must come first
+                   (cn/negotiate-content ["text/event-stream"])        ; request
+                   (bones.http.handlers/session shield)              ; auth
+                   (bones.http.handlers/identity-interceptor shield) ; auth
+                   'bones.http.auth/check-authenticated              ; auth
+                   ]
+   (sse/start-event-stream event-stream-handler)])
+
 (defrecord CQRS [conf shield]
   component/Lifecycle
   (start [cmp]
@@ -301,5 +321,10 @@
                        :get (command-list-resource config auth-sheild)}]
                      ["/query"
                       {:get (query-resource config auth-sheild)}]
+                     (if-let [event-stream-handler (:event-stream-handler config)]
+                       ["/events"
+                        {:get (event-stream-resource config
+                                                     auth-sheild
+                                                     event-stream-handler)}])
                      ["/login"
                       {:post (login-resource config auth-sheild)}]]]]))))))
