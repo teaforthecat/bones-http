@@ -194,3 +194,18 @@
     (let [response (edn-get "/api/query?something=else" valid-token)]
       (is (= "{:message \"query params not valid\", :data {:q missing-required-key, :something disallowed-key}}" (:body response)))
       (is (= 400 (:status response))))))
+
+(defn parse-cookie [cookie]
+  (-> cookie
+      first
+      (clojure.string/split #";")
+      first))
+
+(deftest session-requests
+  (let [login-response (login-post valid-login)
+        cookie (get-in login-response [:headers "Set-Cookie"])]
+    (testing "command with session - reuse the cookie"
+      (let [body-params {:command :echo :args {:who "mr teapot"}}
+            response (edn-post body-params {"cookie" (parse-cookie cookie)})]
+        (is (= "{:who \"mr teapot\"}" (:body response)))
+        (is (= 200 (:status response)))))))
