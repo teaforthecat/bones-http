@@ -1,6 +1,6 @@
-(defproject bones.http "0.1.0-SNAPSHOT"
+(defproject bones.http "0.1.1-SNAPSHOT"
   :description "A CQRS implementation built on Pedestal"
-  :url "http://example.com/FIXME"
+  :url "https://github.com/teaforthecat/bones.http"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[org.clojure/clojure "1.8.0"]
