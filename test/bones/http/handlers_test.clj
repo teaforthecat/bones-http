@@ -9,13 +9,22 @@
             [bones.http.service :as service]
             [ring.middleware.session.store :as store]
             [ring.util.codec :as codec]
+            [clojure.core.async :as a]
             [schema.core :as s]
             ))
 
+(defn test-events [event-channel ctx]
+  (a/put! event-channel {:name "greetings"
+                         :data "hello"
+                         :id 1})
+  (a/close! event-channel))
+
 (def conf {:http/auth {:secret  (apply str (map char (range 32)))
-                       :cookie-name "pizza"}})
+                       :cookie-name "pizza"}
+           :http/handlers {:event-stream-handler test-events}})
 (def shield (.start (auth/map->Shield {:conf conf})))
-(def cqrs (.start (handlers/map->CQRS {:shield shield})))
+(def cqrs (.start (handlers/map->CQRS {:shield shield
+                                       :conf conf})))
 (def routes (:routes cqrs))
 (def service
   (::bootstrap/service-fn (bootstrap/create-servlet (service/service routes {}))))
@@ -36,15 +45,22 @@
 (defn login-post [body-params]
   (edn-post body-params {} "/api/login"))
 
+(defn http-get
+  ([path]
+   (http-get path {}))
+  ([path headers]
+   (response-for service
+                 :get path
+                 :headers headers)))
+
 (defn edn-get
   ([path]
    (edn-get path {}))
   ([path headers]
-   (response-for service
-                 :get path
-                 :headers (merge {"Content-Type" "application/edn"
-                                  "Accept" "application/edn"}
-                                 headers))))
+   (http-get path (merge {"Content-Type" "application/edn"
+                          "Accept" "application/edn"}
+                         headers))))
+
 (defn edn-body [{:keys [body]}]
   (-> body edn/read-string))
 
@@ -209,3 +225,14 @@
             response (edn-post body-params {"cookie" (parse-cookie cookie)})]
         (is (= "{:who \"mr teapot\"}" (:body response)))
         (is (= 200 (:status response)))))))
+
+(deftest event-stream-test
+  (testing "a stream is started"
+    (let [response (http-get "/api/events" (merge valid-token
+                                                  {"Content-Type" "text/event-stream"}))
+          rn "\r\n"]
+      (is (= (str
+              "event: greetings" rn
+              "data: hello" rn
+              "id: 1" rn rn) (:body response)))
+      (is (= 200 (:status response))))))
