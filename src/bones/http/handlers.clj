@@ -300,7 +300,7 @@
   ;; need to use namespace so this can be called from a macro (defroutes)
   [:bones/event-stream
    ^:interceptors ['bones.http.handlers/error-responder              ; request ; must come first
-                   (cn/negotiate-content ["text/event-stream"])        ; request
+                   (cn/negotiate-content ["text/event-stream"])      ; request
                    (bones.http.handlers/session shield)              ; auth
                    (bones.http.handlers/identity-interceptor shield) ; auth
                    'bones.http.auth/check-authenticated              ; auth
