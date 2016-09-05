@@ -4,16 +4,32 @@
             [clojure.edn :as edn]
             [schema.experimental.abstract-map :as abstract-map]
             [schema.core :as s]
+            [bones.http.auth :as auth]
+
             ;;ped
+
             [io.pedestal.http.route :as route]
             [io.pedestal.interceptor :refer [interceptor]]
             [io.pedestal.http.ring-middlewares :as middlewares]
             [io.pedestal.http.content-negotiation :as cn]
             [io.pedestal.http.body-params :as body-params]
             [io.pedestal.http.sse :as sse]
+            [io.pedestal.http.jetty.websockets :as ws]
             [io.pedestal.interceptor.helpers :as helpers]
+            [io.pedestal.log :as log]
             [ring.util.response :as ring-resp]
-            [bones.http.auth :as auth]))
+
+            ;; aleph
+            [compojure.core :as compojure :refer [GET POST]]
+            [ring.middleware.params :as params]
+            [compojure.route :as croute]
+            [compojure.response :refer [Renderable]]
+            [aleph.http :as http]
+            [manifold.stream :as ms]
+            [aleph.http :refer [websocket-connection]]
+            [clojure.core.async :as a]
+            [compojure.api.sweet :as api]
+            ))
 
 (s/defschema Command
   (abstract-map/abstract-map-schema
@@ -146,6 +162,8 @@
   ;; sets request :identity to data of :identity in session cookie
   (helpers/on-request :bones.auth/identity
                       (auth/identity-interceptor shield)))
+
+
 
 (defn session [shield]
   ;; interceptor
@@ -307,15 +325,48 @@
                    ]
    (sse/start-event-stream event-stream-handler)])
 
+(def cors-headers
+  {"Access-Control-Allow-Origin" "http://localhost:3449"
+   "Access-Control-Allow-Headers" "Content-Type,AUTHORIZATION"
+   "Access-Control-Allow-Methods" "GET,POST,OPTIONS"
+   "Access-Control-Allow-Credentials" "true"})
+
+(defn cors-ok []
+  (interceptor {:name :bones/cors-ok
+                :enter (fn [ctx]
+                         (assoc ctx :response
+                                {:status 200
+                                 :body ""
+                                 :headers cors-headers}))}))
+
+(defn ws-paths [mount-path conf]
+  (let [ws-handler (get-in conf [:http/handlers :ws-handler])
+        ws-onclose (get-in conf [:http/handlers :ws-onclose])
+        ws-path (str mount-path "/ws")]
+    {ws-path {:on-connect (ws/start-ws-connection ws-handler)
+              ;; not supported
+              :on-text (fn [msg]
+                         (log/info :msg (str "A client sent - " msg)))
+              ;; not supported
+              :on-binary (fn [payload offset length]
+                           (log/info :msg "Binary Messag!" :bytes payload))
+              :on-error (fn [t]
+                          (log/error :msg "WS Error happened" :exception t))
+              :on-close (fn [num-code reason-text]
+                          (log/info :msg "WS Closed:" :reason reason-text)
+                          (ws-onclose num-code reason-text))}}))
+
 (defrecord CQRS [conf shield]
   component/Lifecycle
   (start [cmp]
     (let [config (get-in cmp [:conf :http/handlers])
-          auth-sheild (:shield cmp)]
+          auth-sheild (:shield cmp)
+          mount-path (or (:mount-path config) "/api")]
       (-> cmp
+          (assoc :ws-paths (ws-paths mount-path (:conf cmp)))
           (assoc :routes
                  (route/expand-routes
-                  [[[(or (:mount-path config) "/api")
+                  [[[mount-path
                      ["/command"
                       {:post (command-resource config auth-sheild)
                        :get (command-list-resource config auth-sheild)}]
@@ -327,4 +378,85 @@
                                                      auth-sheild
                                                      event-stream-handler)}])
                      ["/login"
-                      {:post (login-resource config auth-sheild)}]]]]))))))
+                      {:post (login-resource config auth-sheild)}]
+                     ;; causes not-found:
+                     ;; ["/*any" {:options [:bones/cors (cors-ok)]}]
+                     ]]]))))))
+
+(extend-protocol Renderable
+  manifold.deferred.Deferred
+  (render [d _] d))
+
+(comment
+
+  (def commands [[:who {:first-name s/Str}]
+                 [:what {:weight-kg s/Int}]
+                 [:where {:room-no s/Int}]])
+
+  (defn event-stream-handler [{:keys [params]}]
+    (let [cnt (Integer/parseInt (get params "count" "0"))
+          body (a/chan)]
+      (a/go-loop [i 0]
+        (if (< i cnt)
+          (let [_ (a/<! (a/timeout 100))]
+            (a/>! body (str i "\n"))
+            (recur (inc i)))
+          (a/close! body)))
+      {:status 200
+       :headers {"Content-Type" "text/event-stream"}
+       :body (ms/->source body)}))
+
+
+  (defn ws-handler [{:keys [params] :as req}]
+    (let [cnt (Integer/parseInt (get params "count" "0"))
+          body @(http/websocket-connection req)]
+      (a/go-loop [i 0]
+        (if (< i cnt)
+          (let [_ (a/<! (a/timeout 100))]
+            (a/>! body (str i "\n"))
+            (recur (inc i)))
+          (a/close! body)))
+      ;;no return value
+      ))
+
+  (defn query-handler [req]
+    {:status 200
+     :headers {"content-type" "text"}
+     :body "hello"})
+
+  (def handlers
+    {
+     :login login-handler
+     :commands commands
+     :query query-handler
+     :event-stream event-stream-handler
+     :websocket ws-handler
+     })
+
+  (defn list-commands [cmds]
+    (fn [req]
+      {:status 200
+       :headers {"Content-Type" "text"}
+       :body (pr-str cmds)}))
+
+  (defn handler [handlerz]
+    (let [{:keys [:login
+                  :commands
+                  :query
+                  :event-stream
+                  :websocket]} handlerz]
+      (api/api
+       (api/context "/api" []
+         :tags ["api"]
+         (GET "/commands"  [] (list-commands commands))
+         (GET "/query"     [] query)
+         (POST "/login"    [] login)
+         (GET "/events"    [] event-stream)
+         (GET "/ws"        [] websocket)
+         (croute/not-found "No such page.")))))
+
+  (def s (http/start-server (handler handlers) {:port 3000}))
+
+  (.close s)
+
+  )
