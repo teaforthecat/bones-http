@@ -20,15 +20,20 @@
             [ring.util.response :as ring-resp]
 
             ;; aleph
-            [compojure.core :as compojure :refer [GET POST]]
+            ;; [compojure.core :as compojure :refer [GET POST]]
             [ring.middleware.params :as params]
             [compojure.route :as croute]
             [compojure.response :refer [Renderable]]
             [aleph.http :as http]
             [manifold.stream :as ms]
+            [manifold.deferred :as d]
             [aleph.http :refer [websocket-connection]]
             [clojure.core.async :as a]
             [compojure.api.sweet :as api]
+            [yada.yada :as yada]
+            [bidi.ring :refer [make-handler]]
+            [clj-time.core :as t]
+            [clj-time.coerce :refer (to-date)]
             ))
 
 (s/defschema Command
@@ -433,12 +438,6 @@
      :websocket ws-handler
      })
 
-  (defn list-commands [cmds]
-    (fn [req]
-      {:status 200
-       :headers {"Content-Type" "text"}
-       :body (pr-str cmds)}))
-
   (defn handler [handlerz]
     (let [{:keys [:login
                   :commands
@@ -460,3 +459,58 @@
   (.close s)
 
   )
+
+(defn list-commands [cmds]
+  (fn [req]
+    ;; {:status 200
+    ;;  :headers {"Content-Type" "text"}
+    ;;  :body}
+    (pr-str cmds)))
+
+(defn app [req-handlers]
+  (let [{:keys [:login
+                :commands
+                :query
+                :query-schema
+                :event-stream
+                :websocket]
+         :or {query-schema []}} req-handlers]
+    (api/api
+      (api/context "/api" []
+        :tags ["api"]
+        (api/GET "/commands"  [] (list-commands commands))
+        (api/GET "/query" []
+          query)
+        (api/POST "/login"    [] login)
+        (api/GET "/events"    [] event-stream)
+        (api/GET "/ws"        [] websocket))
+      (croute/not-found "No such page."))))
+
+(defn app2 [req-handlers]
+  (let [{:keys [:login
+                :commands
+                :query
+                :query-schema
+                :event-stream
+                :websocket]
+         :or {query-schema []}} req-handlers]
+    (make-handler ["/api"
+                   [
+                    ["/commands"
+                     (yada/handler
+                      (yada/resource {:id :bones/commands
+                                      :properties {:last-modified (to-date (t/now))}
+                                      :methods {:get
+                                                {:response (list-commands commands)
+                                                 :consumes "application/edn"
+                                                 :produces "application/edn"}
+                                                }}))
+                     :bones/commands]
+                    ["/login"
+                     (yada/handler
+                      (yada/resource {:id :bones/login
+                                      :methods {:post
+                                                {:response login
+                                                 :consumes "application/edn"
+                                                 :produces "application/edn"}}}))]
+                    [true (yada/handler (constantly nil))]]])))
