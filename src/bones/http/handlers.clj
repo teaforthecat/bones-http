@@ -486,6 +486,12 @@
         (api/GET "/ws"        [] websocket))
       (croute/not-found "No such page."))))
 
+(defn bad-request-response [ctx]
+  ; :query is where the schema validation error ends up
+  (if-let [schema-error (->> ctx :error ex-data :errors first (apply hash-map) :query)]
+    (get schema-error :error "error not found")
+    "there was an error parsing the request"))
+
 (defn app2 [req-handlers]
   (let [{:keys [:login
                 :commands
@@ -506,6 +512,17 @@
                                                  :produces "application/edn"}
                                                 }}))
                      :bones/commands]
+                    ["/query"
+                     (yada/handler
+                      (yada/resource {:id :bones/query
+                                      :parameters {:query query-schema}
+                                      :methods {:get
+                                                {:response query
+                                                 :consumes "application/edn"
+                                                 :produces "application/edn"}}
+                                      :responses {400 {
+                                                       :produces #{"application/edn" "text/html" "text/plain;q=0.9"}
+                                                       :response bad-request-response}}}))]
                     ["/login"
                      (yada/handler
                       (yada/resource {:id :bones/login
@@ -513,4 +530,9 @@
                                                 {:response login
                                                  :consumes "application/edn"
                                                  :produces "application/edn"}}}))]
-                    [true (yada/handler (constantly nil))]]])))
+                    [true (yada/handler (yada/resource {:id :bones/not-found
+                                                        :methods {:* nil}
+                                                        :properties {:exists? false}
+                                                        :responses {404 {
+                                                                         :produces #{"text/html" "text/plain;q=0.9"}
+                                                                         :response (fn [ctx]  "not found")}}}))]]])))

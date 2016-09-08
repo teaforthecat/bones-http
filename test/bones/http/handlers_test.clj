@@ -64,7 +64,7 @@
    :login login-handler
    :commands commands
    :query query-handler
-   :query-schema [:name :- String]
+   :query-schema {:name String}
    :event-stream event-stream-handler
    :websocket ws-handler
    })
@@ -72,46 +72,69 @@
 
 (defn new-app [] (handlers/app2 test-handlers))
 
+(defn get-response [ctx]
+  (-> ctx
+      :response
+      deref
+      (update :body bs/to-string)))
+
 (defn GET [app path params]
   (-> (p/session app)
       (p/request path
                  :request-method :get
                  :content-type "application/edn"
-                 :params params)))
+                 :params params)
+      (get-response)))
 
 (defn POST [app path params]
   (-> (p/session app)
       (p/request path
                  :request-method :post
                  :content-type "application/edn"
-                 :body (pr-str params))))
+                 :body (pr-str params))
+      (get-response)))
 
+(defmacro has [response & attrs]
+  `(are [k v] (= v (k ~response))
+    ~@attrs))
 
 (deftest get-commands
   (let [app (new-app)
-        response @(:response (GET app "/api/commands" {}))]
-    (is (= "wat" response))
-    (is (= "wat" (bs/to-string (:body response))))
-    (is (= 200 (:status response)))))
+        response (GET app "/api/commands" {})]
+    (has response
+         :status 200
+         :body "[[:who {:first-name java.lang.String}] [:what {:weight-kg Int}] [:where {:room-no Int}]]")))
 
-(deftest post-commands
+(deftest not-found
   (let [app (new-app)
-        response  @(:response (GET (new-app) "/api/command" {}))]
-    (is (= "wat" response))
-    (is (= "wat" (bs/to-string (:body response))))
-    (is (= 200 (:status response)))))
+        response (GET (new-app) "/api/nothing" {})]
+    (has response
+         :status 404
+         :body "not found")))
 
 (deftest get-query
-  (let [app (new-app)
-        response (:response (GET app "/api/query" {:q 123}))]
-    (are [k v] (= v (k response))
-      :status 400)
-    (is (= "{:errors {:name missing-required-key}}" (bs/to-string (:body response))))))
+  (testing "valid params"
+    (let [app (new-app)
+          response (GET app "/api/query" {:name "abc"})]
+      (has response
+           :status 200
+           :headers {"x-frame-options" "SAMEORIGIN", "x-xss-protection" "1; mode=block", "x-content-type-options" "nosniff", "content-length" "5", "content-type" "application/edn"}
+           :body "hello")))
+  (testing "missing required param"
+    (let [app (new-app)
+          response (GET app "/api/query" {:q 123})]
+      (has response
+           :status 400
+           :headers {"content-length" "49", "content-type" "application/edn"}
+           :body "{:name missing-required-key, \"q\" disallowed-key}\n"))))
 
 (deftest post-login
   (let [app (new-app)
-        response @(:response (POST app "/api/login" {:username "abc" :password "123"}))]
-    (is (= "Welcome" (bs/to-string (:body response))))))
+        response (POST app "/api/login" {:username "abc" :password "123"})]
+    (has response
+         :status 200
+         :headers {"x-frame-options" "SAMEORIGIN", "x-xss-protection" "1; mode=block", "x-content-type-options" "nosniff", "content-length" "7", "content-type" "application/edn"}
+         :body "Welcome")))
 
 
 
