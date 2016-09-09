@@ -15,7 +15,7 @@
             [aleph.http :as http]
             [byte-streams :as bs]
             [ring.mock.request :refer (request) :rename {request mock-request}]
-
+            [bones.http.yada :as yada]
             [schema.core :as s]
             ))
 
@@ -70,7 +70,7 @@
    })
 
 
-(defn new-app [] (handlers/app2 test-handlers))
+(defn new-app [] (yada/app test-handlers))
 
 (defn get-response [ctx]
   (-> ctx
@@ -103,13 +103,16 @@
         response (GET app "/api/commands" {})]
     (has response
          :status 200
-         :body "[[:who {:first-name java.lang.String}] [:what {:weight-kg Int}] [:where {:room-no Int}]]")))
+         :headers {}
+         :body "[[:who {:first-name java.lang.String}] [:what {:weight-kg Int}] [:where {:room-no Int}]]\n")))
 
 (deftest not-found
   (let [app (new-app)
         response (GET (new-app) "/api/nothing" {})]
     (has response
          :status 404
+         ;; note: json?-what?
+         :headers {"content-length" "9", "content-type" "application/json"}
          :body "not found")))
 
 (deftest get-query
