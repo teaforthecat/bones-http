@@ -19,24 +19,29 @@
             [schema.core :as s]
             ))
 
+(def conf {:http/auth {:secret  (apply str (map char (range 32)))
+                       :cookie-name "pizza"}})
 
-(def commands [[:who {:first-name s/Str}]
+(def shield (.start (auth/map->Shield {:conf conf})))
+
+(defn who [args req]
+  {:message (str "Hello" (:first-name args))})
+(defn what [args req] args)
+(defn where [args req] args)
+
+(def commands [[:who {:first-name s/Str} ::who]
                [:what {:weight-kg s/Int}]
                [:where {:room-no s/Int}]])
 
-(defn event-stream-handler [{:keys [params]}]
-  (let [cnt (Integer/parseInt (get params "count" "0"))
-        body (a/chan)]
-    (a/go-loop [i 0]
-      (if (< i cnt)
-        (let [_ (a/<! (a/timeout 100))]
-          (a/>! body (str i "\n"))
-          (recur (inc i)))
-        (a/close! body)))
-    {:status 200
-     :headers {"Content-Type" "text/event-stream"}
-     :body (ms/->source body)}))
-
+(defn event-stream-handler [req auth-info]
+  (let [output-stream (ms/stream)
+        count (Integer/parseInt (get-in req [:query "count"] "0"))
+        source (ms/->source (range 2))]
+    (ms/connect
+     source
+     output-stream)
+    ;; must return the stream
+    output-stream))
 
 (defn ws-handler [{:keys [params] :as req}]
   (let [cnt (Integer/parseInt (get params "count" "0"))
@@ -44,9 +49,9 @@
     (a/go-loop [i 0]
       (if (< i cnt)
         (let [_ (a/<! (a/timeout 100))]
-          (a/>! body (str i "\n"))
+          (ms/put! body (str i "\n"))
           (recur (inc i)))
-        (a/close! body)))
+        (ms/close! body)))
     ;;no return value
     ))
 
@@ -70,7 +75,7 @@
    })
 
 
-(defn new-app [] (yada/app test-handlers))
+(defn new-app [] (yada/app test-handlers shield))
 
 (defn get-response [ctx]
   (-> ctx
@@ -86,11 +91,16 @@
                  :params params)
       (get-response)))
 
+(def valid-token
+  {"Authorization" "Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-KBhDMBnLd1tRL4u_fxC5nKTWB1TA7mt.vZ36HSF4yNVRxjP5.37-PnQnhKF3QMclC0jYObzcV.BwliiVaQu5n5Ylkvrs51lg"})
+
 (defn POST [app path params]
   (-> (p/session app)
       (p/request path
                  :request-method :post
                  :content-type "application/edn"
+                 ;; this token was encrypted from then login response
+                 :headers valid-token
                  :body (pr-str params))
       (get-response)))
 
@@ -134,12 +144,45 @@
 (deftest post-login
   (let [app (new-app)
         response (POST app "/api/login" {:username "abc" :password "123"})]
-    (has response
-         :status 200
-         :headers {"x-frame-options" "SAMEORIGIN", "x-xss-protection" "1; mode=block", "x-content-type-options" "nosniff", "content-length" "7", "content-type" "application/edn"}
-         :body "Welcome")))
+          (is (= 200 (:status response)))
+          (is (= (get (:headers response) "content-type") "application/edn"))
+          (is (contains? (:headers response) "set-cookie"))
+          (is (= "token"  (re-find #"token" (:body response))))))
 
 
+(deftest post-command
+  (testing "valid command"
+    (let [app (new-app)
+          response (POST app "/api/command" {:command :who
+                                             :args {:first-name "Santiago"}})]
+      (has response
+           :status 200
+           :headers {"x-frame-options" "SAMEORIGIN", "x-xss-protection" "1; mode=block", "x-content-type-options" "nosniff", "content-length" "27", "content-type" "application/edn"}
+           :body "{:message \"HelloSantiago\"}\n")))
+  (testing "invalid command"
+    (let [app (new-app)
+          response (POST app "/api/command" {:command :who
+                                             :args {:last-name "Santiago"}})]
+      (has response
+           :status 400
+           :headers {"x-frame-options" "SAMEORIGIN", "x-xss-protection" "1; mode=block", "x-content-type-options" "nosniff", "content-length" "70", "content-type" "application/edn"}
+           :body "{:args {:first-name missing-required-key, :last-name disallowed-key}}\n"))))
+
+(deftest get-events
+  (testing "format events"
+    (are [in out] (= out (yada/format-event in))
+      {:event 1 :id 2 :data 3} "event: 1\nid: 2\ndata: 3\n\n"
+      "whatever\n"             "data: whatever\n\n\n"
+      {:id "oops"}             "id: oops\ndata: {:id \"oops\"}\n\n"
+      {:event "oops"}          "event: oops\ndata: {:event \"oops\"}\n\n"))
+  (testing "get number stream"
+    (let [app (new-app)
+          response (GET app "/api/events" {})]
+      (has response
+           :status 200
+           :headers {"x-frame-options" "SAMEORIGIN", "x-xss-protection" "1; mode=block", "x-content-type-options" "nosniff", "content-type" "text/event-stream"}
+           :body "data: 0\n\ndata: 1\n\n"
+           ))))
 
 
 
