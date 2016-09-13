@@ -13,7 +13,7 @@
 (deftest start-system
   (testing "shield gets created and used by routes"
     (http/build-system sys conf)
-    (http/start-system sys)
+    (http/start sys)
     (is (= "a 16 byte stringa 32 byte string" (get-in @sys [:routes :shield :secret])))
     (is (= "pizza" (get-in @sys [:routes :shield :cookie-opts :cookie-name])))
-    (http/stop-system sys)))
+    (http/stop sys)))
