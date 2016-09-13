@@ -29,9 +29,3 @@
   (stop [cmp]
     (update cmp :server server/stop)))
 
-(defn start-system [system & components]
-  (swap! system component/update-system components component/start))
-
-(defn stop-system [system & components]
-  (swap! system component/update-system-reverse components component/stop))
-
