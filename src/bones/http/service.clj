@@ -9,7 +9,7 @@
     (let [config (get-in cmp [:conf :http/service])
           app (get-in cmp [:routes])]
       (assoc cmp :server (http/start-server (make-handler (:routes app))
-                                            {:port (:port config)
+                                            {:port (or (:port config) 3000)
                                              :raw-stream? true}))))
   (stop [cmp]
     (when-let [server (:server cmp)]

@@ -19,7 +19,8 @@
   (swap! system component/update-system-reverse components component/stop))
 
 (defn start [sys]
-  ;; order matters here, conf<-shield<-routes<-http
+  ;; order matters here (even though it shouldn't?)
+  ;; conf<-shield<-routes<-http
   (start-system sys :conf :shield :routes :http))
 
 (defn stop [sys]

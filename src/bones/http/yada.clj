@@ -20,36 +20,27 @@
             [byte-streams :as bs]
             [com.stuartsierra.component :as component]))
 
-(def content-types
-  #{"application/edn"
-    "application/json"
-    "application/xml"
-    "application/html"
-    "text/plain"})
-
 (defn allow-cors [shield]
-  {:allow-origin (get shield :allow-origin "http://localhost:3449")
+  {:allow-origin (:cors-allow-origin shield)
    :allow-credentials true
    :allow-methods #{:get :post}
    :allow-headers ["Content-Type" "Authorization"]})
 
-(defn authenticate [auth-fn]
+(defn authenticate [auth-fn cookie-name]
   (fn [ctx]
-    (let [token (get-in ctx [:cookies "bones-session"])
+    (let [token (get-in ctx [:cookies cookie-name])
+          ;; hack to use the token as the cookie
           request (update-in (:request ctx)
                              [:headers "authorization"]
                              #(or % (str "Token " token)))]
       (:identity (auth-fn request)))))
 
 (defn require-login [shield]
-  (let [auth-fn (identity-interceptor shield)]
-    {:authentication-schemes [{:verify (authenticate auth-fn)}
+  (let [auth-fn (identity-interceptor shield)
+        cookie-name (:cookie-name shield)]
+    {:authentication-schemes [{:verify (authenticate auth-fn cookie-name)}
                               ]
      :authorization {:scheme :bones/authorize}}))
-
-(defn list-commands [cmds]
-  (fn [req]
-    (pr-str cmds)))
 
 (defn handler [resource]
   (yada/handler
@@ -78,7 +69,7 @@
   (if credentials
     ctx
     (d/error-deferred
-     (ex-info "No authorization provided"
+     (ex-info "authorization required"
               {:status 401}))))
 
 (defn command-params-handler [ctx]
@@ -87,8 +78,8 @@
                          (edn/read-string))]
     (if-let [errors (s/check Command command-body)]
       (assoc (:response ctx) :status 400 :body errors)
-      ;;maybe add the request too?
-      (command command-body (:authorization ctx)))))
+      ;; note: access the :identity on the request for login info
+      (command command-body (assoc (:request ctx) :identity (:authorization ctx))))))
 
 (defn command-handler [commands shield]
   ;; hack to ensure registration - abstract-map is experimental
@@ -108,7 +99,9 @@
   (handler {:id :bones/command-list
             :properties {:last-modified (to-date (t/now))}
             :methods {:get
-                      {:response commands
+                      ;; only show the command name and args schema
+                      ;; todo: expand on this or replace with swagger
+                      {:response (map #(take 2 %) commands)
                        :produces "application/edn"}}}))
 
 (defn query-handler [q-fn q-schema shield]
@@ -135,12 +128,14 @@
           (assoc-in [:response :body] {"token" token})))))
 
 (defn handle-error [ctx]
+  ;; bare minimum to show it
   (pr-str (:error ctx)))
 
 (defn login-handler [login-fn shield]
   (-> {:id :bones/login
        :access-control (allow-cors shield)
        :responses {500 {:produces "text/plain"
+                        ;; todo: don't do this in production
                         :response handle-error}}
        :methods {:post
                  {:response login-fn
@@ -169,7 +164,6 @@
                                    (allow-cors shield))
             :methods {:get
                       {:produces "text/event-stream"
-                       ;; maybe don't create the stream here
                        :response (fn [ctx]
                                    (let [auth-info (:authentication ctx)
                                          req (:request ctx)
@@ -182,7 +176,9 @@
             :methods {:* nil}
             :properties {:exists? false}
             :responses {404 {
-                             :produces content-types
+                             :produces #{"application/edn"
+                                         "application/json"
+                                         "text/plain"}
                              :response "not found"}}}))
 
 (defn routes [req-handlers shield]
@@ -191,7 +187,6 @@
                 :query
                 :query-schema
                 :event-stream
-                :websocket
                 :mount-path]
          :or {:query-schema []
               :mount-path "/api"
@@ -201,7 +196,7 @@
       ["/command"
        (command-handler commands shield)
        :bones/command]
-      ["/commands" ;; this should not be necessary if swagger
+      ["/commands"
        (command-list-handler commands)
        :bones/commands]
       ["/query"
