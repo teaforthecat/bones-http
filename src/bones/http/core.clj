@@ -3,14 +3,13 @@
             [bones.http.auth :as auth]
             [bones.http.handlers :as handlers]
             [bones.http.commands]
-            [bones.http.yada :as y]
             [bones.http.service :as service]))
 
 (defn build-system [sys conf]
   (swap! sys #(-> %
                   (assoc :conf conf)
                   (assoc :shield (component/using (auth/map->Shield {}) [:conf]) )
-                  (assoc :routes (component/using (y/map->App {}) [:conf :shield]))
+                  (assoc :routes (component/using (handlers/map->App {}) [:conf :shield]))
                   (assoc :http   (component/using (service/map->Server {}) [:conf :routes])))))
 
 (defn start-system [system & components]

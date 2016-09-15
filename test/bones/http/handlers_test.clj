@@ -13,19 +13,10 @@
             [bones.http.yada :as yada]
             [schema.core :as s]))
 
+;; start example implementation
+
 (def conf {:http/auth {:secret  (apply str (map char (range 32)))
                        :cookie-name "pizza"}})
-
-(def shield (.start (auth/map->Shield {:conf conf})))
-
-(defn who [args req]
-  {:message (str "Hello" (:first-name args))})
-(defn what [args req] args)
-(defn where [args req] args)
-
-(def commands [[:who {:first-name s/Str} who]
-               [:what {:weight-kg s/Int} what]
-               [:where {:room-no s/Int}  where]])
 
 (defn event-stream-handler [req auth-info]
   (let [output-stream (ms/stream)
@@ -43,15 +34,14 @@
 (defn login-handler [req]
   "Welcome")
 
-(def valid-token
-  {"Authorization" "Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-KBhDMBnLd1tRL4u_fxC5nKTWB1TA7mt.vZ36HSF4yNVRxjP5.37-PnQnhKF3QMclC0jYObzcV.BwliiVaQu5n5Ylkvrs51lg"})
+(defn who [args req]
+  {:message (str "Hello" (:first-name args))})
+(defn what [args req] args)
+(defn where [args req] args)
 
-(defn secure-and [headers]
-  (merge
-   {"x-frame-options" "SAMEORIGIN"
-    "x-xss-protection" "1; mode=block"
-    "x-content-type-options" "nosniff"}
-   headers))
+(def commands [[:who {:first-name s/Str} who]
+               [:what {:weight-kg s/Int} what]
+               [:where {:room-no s/Int}  where]])
 
 (def test-handlers
   {
@@ -62,8 +52,29 @@
    :event-stream event-stream-handler
    })
 
+;; end example
+
+;; start setup
+(def shield (.start (auth/map->Shield {:conf conf})))
+
 (defn new-app []
   (yada/app test-handlers shield))
+
+(def valid-token
+  ;; this token was encrypted from the login response
+  {"Authorization" "Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-KBhDMBnLd1tRL4u_fxC5nKTWB1TA7mt.vZ36HSF4yNVRxjP5.37-PnQnhKF3QMclC0jYObzcV.BwliiVaQu5n5Ylkvrs51lg"})
+
+;; end setup
+
+;; start helpers
+
+(defn secure-and [headers]
+  ;; security headers provided by yada
+  (merge
+   {"x-frame-options" "SAMEORIGIN"
+    "x-xss-protection" "1; mode=block"
+    "x-content-type-options" "nosniff"}
+   headers))
 
 (defn get-response [ctx]
   (-> ctx
@@ -88,7 +99,6 @@
       (p/request path
                  :request-method :post
                  :content-type "application/edn"
-                 ;; this token was encrypted from then login response
                  :headers headers
                  :body (pr-str params))
       (get-response)))
@@ -99,6 +109,10 @@
 (defmacro has [response & attrs]
   `(are [k v] (= v (k ~response))
     ~@attrs))
+
+;; end helpers
+
+;; start tests
 
 (deftest get-commands
   (let [app (new-app)
