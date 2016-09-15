@@ -1,5 +1,5 @@
 (ns bones.http.yada
-  (:require [bones.http.handlers :refer [Command register-commands command]]
+  (:require [bones.http.commands :as commands]
             [bones.http.auth :refer [identity-interceptor]]
             [ring.middleware.params :as params]
             [compojure.route :as croute]
@@ -76,15 +76,17 @@
   (let [command-body (-> (get-in ctx [:request :body])
                          (bs/to-string)
                          (edn/read-string))]
-    (if-let [errors (s/check Command command-body)]
+    (if-let [errors (s/check commands/Command command-body)]
       (assoc (:response ctx) :status 400 :body errors)
       ;; note: access the :identity on the request for login info
-      (command command-body (assoc (:request ctx) :identity (:authorization ctx))))))
+      (commands/command command-body (assoc (:request ctx) :identity (:authorization ctx))))))
 
 (defn command-handler [commands shield]
   ;; hack to ensure registration - abstract-map is experimental
   ;; if the print is removed, for some reason(!), the commands don't get registered
-  (pr-str (register-commands commands))
+  (println "kommands")
+  (println (pr-str commands))
+  (pr-str (commands/register-commands commands))
   (handler {:id :bones/command
             :access-control (merge
                              (require-login shield)

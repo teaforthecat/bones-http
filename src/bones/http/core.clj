@@ -2,6 +2,7 @@
   (:require [com.stuartsierra.component :as component]
             [bones.http.auth :as auth]
             [bones.http.handlers :as handlers]
+            [bones.http.commands]
             [bones.http.yada :as y]
             [bones.http.service :as service]))
 

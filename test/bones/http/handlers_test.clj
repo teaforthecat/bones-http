@@ -23,9 +23,9 @@
 (defn what [args req] args)
 (defn where [args req] args)
 
-(def commands [[:who {:first-name s/Str} ::who]
-               [:what {:weight-kg s/Int} ::what]
-               [:where {:room-no s/Int}] ::where])
+(def commands [[:who {:first-name s/Str} who]
+               [:what {:weight-kg s/Int} what]
+               [:where {:room-no s/Int}  where]])
 
 (defn event-stream-handler [req auth-info]
   (let [output-stream (ms/stream)
@@ -62,7 +62,8 @@
    :event-stream event-stream-handler
    })
 
-(defn new-app [] (yada/app test-handlers shield))
+(defn new-app []
+  (yada/app test-handlers shield))
 
 (defn get-response [ctx]
   (-> ctx
