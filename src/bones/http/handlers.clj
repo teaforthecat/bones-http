@@ -127,6 +127,10 @@
           (assoc-in [:response :cookies] {cookie-name token})
           (assoc-in [:response :body] {"token" token})))))
 
+(defn unset-cookie [shield ctx]
+  (let [cookie-name (:cookie-name shield)]
+    (assoc-in ctx [:response :cookies] {cookie-name ""})))
+
 (defn handle-error [ctx]
   ;; bare minimum to show it
   (pr-str (:error ctx)))
@@ -147,6 +151,22 @@
        (partial encrypt-response shield))
       (yada/handler)))
 
+(defn logout-handler [logout-fn shield]
+  (-> {:id :bones/login
+       :access-control (allow-cors shield)
+       :responses {500 {:produces "text/plain"
+                        ;; todo: don't do this in production
+                        :response handle-error}}
+       :methods {:get ; only get or post will be allowed
+                 {:response logout-fn
+                  :consumes "application/edn"
+                  :produces "application/edn"}}}
+      (yada/resource)
+      (yada.resource/insert-interceptor
+       yada.interceptors/create-response
+       (partial unset-cookie shield))
+      (yada/handler)))
+
 (defn format-event [{:keys [event data id] :as datum :or {data datum}}]
   ;; allows map of sse keys or just anything as data to be str'd
   ;; todo: do non-integer id's break the client?
@@ -158,12 +178,13 @@
     id    (str "id: " id "\n")
     true  (str "data: " data "\n\n")))
 
-(defn handle-event-stream [ctx]
-  (let [auth-info (:authentication ctx)
-        req (:request ctx)
-        source (event-fn req auth-info)]
-    (ms/transform (map format-event)
-                  source)))
+(defn handle-event-stream [event-fn]
+  (fn [ctx]
+    (let [auth-info (:authentication ctx)
+          req (:request ctx)
+          source (event-fn req auth-info)]
+      (ms/transform (map format-event)
+                    source))))
 
 (defn event-stream-handler [event-fn shield]
   (handler {:id :bones/event-stream
@@ -171,7 +192,7 @@
                                    (allow-cors shield))
             :methods {:get
                       {:produces "text/event-stream"
-                       :response handle-event-stream}}}))
+                       :response (handle-event-stream event-fn)}}}))
 
 (defn not-found-handler []
   (handler {:id :bones/not-found
@@ -184,7 +205,9 @@
                              :response "not found"}}}))
 
 (defn routes [req-handlers shield]
+  ;; if query is nil/not given, 404 will be the response to ./query
   (let [{:keys [:login
+                :logout
                 :commands
                 :query
                 :query-schema
@@ -192,7 +215,8 @@
                 :mount-path]
          :or {:query-schema []
               :mount-path "/api"
-              :commands []}} req-handlers]
+              :commands []
+              :logout (fn [ctx] "")}} req-handlers]
     [mount-path
      [
       ["/command"
@@ -207,6 +231,9 @@
       ["/login"
        (login-handler login shield)
        :bones/login]
+      ["/logout"
+       (logout-handler logout shield)
+       :bones/logout]
       ["/events"
        (event-stream-handler event-stream shield)
        :bones/event-stream]

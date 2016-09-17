@@ -10,7 +10,7 @@
             [aleph.http :as http]
             [byte-streams :as bs]
             [ring.mock.request :refer (request) :rename {request mock-request}]
-            [bones.http.yada :as yada]
+            [bones.http.handlers :as handlers]
             [schema.core :as s]))
 
 ;; start example implementation
@@ -58,7 +58,7 @@
 (def shield (.start (auth/map->Shield {:conf conf})))
 
 (defn new-app []
-  (yada/app test-handlers shield))
+  (handlers/app test-handlers shield))
 
 (def valid-token
   ;; this token was encrypted from the login response
@@ -80,7 +80,7 @@
   (-> ctx
       :response
       deref
-      (update :body bs/to-string)))
+      (update :body (fnil bs/to-string ""))))
 
 (defn GET [app path params headers]
   (-> (p/session app)
@@ -105,6 +105,15 @@
 
 (defn api-post [app path params]
   (POST app path params valid-token))
+
+(defn OPTIONS [app path]
+  (-> (p/session app)
+      (p/request path
+                 :request-method :options
+                 :headers {"Access-Control-Request-Method" "POST"
+                           "Origin" "http://localhost:3449"
+                           "Access-Control-Request-Headers" "content-type"})
+      (get-response)))
 
 (defmacro has [response & attrs]
   `(are [k v] (= v (k ~response))
@@ -147,12 +156,24 @@
            :body "{:name missing-required-key, \"q\" disallowed-key}\n"))))
 
 (deftest post-login
-  (let [app (new-app)
-        response (POST app "/api/login" {:username "abc" :password "123"} {})]
-          (is (= 200 (:status response)))
-          (is (= (get (:headers response) "content-type") "application/edn"))
-          (is (contains? (:headers response) "set-cookie"))
-          (is (= "token"  (re-find #"token" (:body response))))))
+  (testing "set-cookie"
+    (let [app (new-app)
+          response (POST app "/api/login" {:username "abc" :password "123"} {})]
+      (is (= 200 (:status response)))
+      (is (= (get (:headers response) "content-type") "application/edn"))
+      (is (contains? (:headers response) "set-cookie"))
+      (is (= "token"  (re-find #"token" (:body response)))))))
+
+(deftest get-logout
+  (testing "unset cookie"
+    (let [app (new-app)
+          response (GET app "/api/logout" {} {})]
+      (has response
+           :status 200
+           :headers (secure-and {"content-length" "0"
+                                 "content-type" "application/edn"
+                                 "set-cookie" '("pizza=")})
+           :body ""))))
 
 (deftest post-command
   (testing "valid command"
@@ -174,7 +195,7 @@
 
 (deftest get-events
   (testing "format events"
-    (are [in out] (= out (yada/format-event in))
+    (are [in out] (= out (handlers/format-event in))
       {:event 1 :id 2 :data 3} "event: 1\nid: 2\ndata: 3\n\n"
       "whatever\n"             "data: whatever\n\n\n"
       {:id "oops"}             "id: oops\ndata: {:id \"oops\"}\n\n"
@@ -187,3 +208,11 @@
            :headers (secure-and {"content-type" "text/event-stream"})
            :body "data: 0\n\ndata: 1\n\n"
            ))))
+
+(deftest cors
+  (testing "login"
+    (let [app (new-app)
+          response (OPTIONS app "/api/login")]
+      (has response
+           :status 200
+           :headers {"allow" "POST, OPTIONS", "content-length" "0", "access-control-allow-origin" "http://localhost:3449", "access-control-allow-credentials" "true", "access-control-allow-methods" "GET, POST", "access-control-allow-headers" "Content-Type, Authorization", "x-frame-options" "SAMEORIGIN", "x-xss-protection" "1; mode=block", "x-content-type-options" "nosniff"}))))

@@ -8,19 +8,23 @@
 
 (defn event-stream-handler [req auth-info]
   (let [output-stream (ms/stream)
-        source (ms/->source (range 2))]
+        source (ms/->source (range 10))]
     (ms/connect
      source
      output-stream)
     ;; must return the stream
     output-stream))
 
-(defn sieve [req]
+(defn sieve [ctx]
   {:salutations "Greetings"})
 
 (defn start []
   (http/build-system sys {:http/handlers {:login sieve
-                                     :event-stream event-stream-handler}
+                                          :query-schema {(s/optional-key :accounts) s/Any
+                                                         (s/optional-key :account) s/Int}
+                                          :query-handler (fn [args auth-info]
+                                                           [args auth-info])
+                                          :event-stream event-stream-handler}
                                         ;(bones.http.auth/gen-secret)
                           :http/auth {:secret "CypOW2ZYqvB42ahTI9GdXZ5v4sphlwdC"
                                       :allow-origin "http://localhost:3449"}

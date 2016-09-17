@@ -113,6 +113,7 @@
           (assoc :algorithm algorithm)
           (assoc :cookie-backend (session-backend))
           (assoc :cookie-name cookie-name)
+          (assoc :cors-allow-origin cors-allow-origin)
           ;; ring.middleware.session.cookie says the secret key must be exactly 16 bytes(characters)
           (assoc :cookie-opts {:store (cookie-store {:key cookie-secret})
                                :cookie-name cookie-name
