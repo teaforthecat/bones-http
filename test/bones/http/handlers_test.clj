@@ -28,29 +28,36 @@
     ;; must return the stream
     output-stream))
 
-(defn query-handler [req]
-  "hello")
+(defn query-handler [args auth-info req]
+  ["ok" args auth-info req])
 
-(defn login-handler [req]
-  "Welcome")
+(def query-schema {:name s/Str})
 
-(defn who [args req]
+;;(reduce max (map count (:arglists  (meta #'query-handler))))
+
+(defn login-handler [args req]
+  [args "Welcome"])
+
+(defn logout-handler [req]
+  "goodbye")
+
+(def login-schema {:username s/Str :password s/Str})
+
+(defn who [args auth-info req]
   {:message (str "Hello" (:first-name args))})
-(defn what [args req] args)
-(defn where [args req] args)
+(defn what [args auth-info req] args)
+(defn where [args auth-info req] args)
 
 (def commands [[:who {:first-name s/Str} who]
                [:what {:weight-kg s/Int} what]
                [:where {:room-no s/Int}  where]])
 
 (def test-handlers
-  {
-   :login login-handler
+  {:login [login-schema login-handler]
+   :logout logout-handler
    :commands commands
-   :query query-handler
-   :query-schema {:name String}
-   :event-stream event-stream-handler
-   })
+   :query [query-schema query-handler]
+   :event-stream event-stream-handler})
 
 ;; end example
 
@@ -62,6 +69,7 @@
 
 (def valid-token
   ;; this token was encrypted from the login response
+  ;; if the secret changes, this wil have to change; TODO: generate this
   {"Authorization" "Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-KBhDMBnLd1tRL4u_fxC5nKTWB1TA7mt.vZ36HSF4yNVRxjP5.37-PnQnhKF3QMclC0jYObzcV.BwliiVaQu5n5Ylkvrs51lg"})
 
 ;; end setup
@@ -145,8 +153,8 @@
           response (api-get app "/api/query" {:name "abc"})]
       (has response
            :status 200
-           :headers (secure-and {"content-length" "5", "content-type" "application/edn"})
-           :body "hello")))
+           :headers (secure-and {"content-length" "536", "content-type" "application/edn"})
+           :body "[\"ok\" {:query {:name \"abc\"}} {\"default\" {:data \"Welcome\"}} {:remote-addr \"localhost\", :params nil, :route-params nil, :headers {\"host\" \"localhost\", \"authorization\" \"Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-KBhDMBnLd1tRL4u_fxC5nKTWB1TA7mt.vZ36HSF4yNVRxjP5.37-PnQnhKF3QMclC0jYObzcV.BwliiVaQu5n5Ylkvrs51lg\", \"content-type\" \"application/edn\"}, :server-port 80, :content-type \"application/edn\", :uri \"/api/query\", :server-name \"localhost\", :query-string \"name=abc\", :body nil, :scheme :http, :request-method :get}]\n")))
   (testing "missing required param"
     (let [app (new-app)
           response (api-get app "/api/query" {:q 123})]
@@ -170,16 +178,16 @@
           response (GET app "/api/logout" {} {})]
       (has response
            :status 200
-           :headers (secure-and {"content-length" "0"
+           :headers (secure-and {"content-length" "7"
                                  "content-type" "application/edn"
                                  "set-cookie" '("pizza=")})
-           :body ""))))
+           :body "goodbye"))))
 
 (deftest post-command
   (testing "valid command"
     (let [app (new-app)
           response (api-post app "/api/command" {:command :who
-                                             :args {:first-name "Santiago"}})]
+                                                 :args {:first-name "Santiago"}})]
       (has response
            :status 200
            :headers (secure-and {"content-length" "27", "content-type" "application/edn"})

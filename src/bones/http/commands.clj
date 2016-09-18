@@ -9,7 +9,8 @@
    {:args {s/Keyword s/Any}}))
 
 ;; a default is not needed due to the `check-command-exists' interceptor
-(defmulti command :command)
+;; get the command on the first argument
+(defmulti command (fn [cmd auth-info req] (:command cmd)))
 
 (defn add-command
   "ensure a unique command is created based on a name spaced keyword"
@@ -27,14 +28,17 @@
                                  [command-name])))
 
 (defn resolve-command [command-name]
-  (if (keyword? command-name)
-    (let [nmspc (namespace command-name)
-          f     (name command-name)]
-      (if nmspc
-        (ns-resolve (symbol nmspc) (symbol f))
-        (resolve (symbol f))))
-    (if (fn? command-name)
-      command-name)))
+  (cond
+    (keyword? command-name)
+      (let [nmspc (namespace command-name)
+            f     (name command-name)]
+        (if nmspc
+          (ns-resolve (symbol nmspc) (symbol f))
+          (resolve (symbol f))))
+    (symbol? command-name)
+      (resolve command-name)
+    (fn? command-name)
+      command-name))
 
 (defn register-command
   "the command can have the same name of the function (implicit) - it must also
@@ -55,8 +59,9 @@
                             (pr-str explicit-handler))
                        {:command explicit-handler})))
      (add-command command-name schema)
-     (defmethod command command-name [command req]
-       (command-handler (:args command) req)))))
+     (defmethod command command-name [command auth-info req]
+       (command-handler (:args command) auth-info req)))))
+
 
 (defn register-commands [commands]
   (map (partial apply register-command) commands))

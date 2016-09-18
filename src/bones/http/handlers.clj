@@ -73,13 +73,16 @@
               {:status 401}))))
 
 (defn handle-command [ctx]
-  (let [command-body (-> (get-in ctx [:request :body])
+  ;; the parameters are empty because the Commands schema didn't work
+  ;; as the :parameters on the resource so we will parse the body ourselves
+  (let [{:keys [authentication request]} ctx
+        command-body (-> (:body request)
                          (bs/to-string)
                          (edn/read-string))]
     (if-let [errors (s/check commands/Command command-body)]
       (assoc (:response ctx) :status 400 :body errors)
       ;; note: in the command handler, access the :identity on the request for login info
-      (commands/command command-body (assoc (:request ctx) :identity (:authorization ctx))))))
+      (commands/command command-body authentication request))))
 
 (defn command-handler [commands shield]
   ;; hack to ensure registration - abstract-map is experimental
@@ -104,14 +107,15 @@
                       {:response (map #(take 2 %) commands)
                        :produces "application/edn"}}}))
 
-(defn query-handler [query-fn query-schema shield]
+(defn query-handler [query-schema query-fn shield]
   (handler {:id :bones/query
             :parameters {:query query-schema}
             :access-control (merge
                              (require-login shield)
                              (allow-cors shield))
             :methods {:get
-                      {:response query-fn
+                      {:response (fn [{:keys [parameters authentication request]}]
+                                   (query-fn parameters authentication request))
                        :consumes "application/edn"
                        :produces "application/edn"}}
             :responses (bad-request-response :query)}))
@@ -135,14 +139,15 @@
   ;; bare minimum to show it
   (pr-str (:error ctx)))
 
-(defn login-handler [login-fn shield]
+(defn login-handler [login-schema login-fn shield]
   (-> {:id :bones/login
        :access-control (allow-cors shield)
        :responses {500 {:produces "text/plain"
                         ;; todo: don't do this in production
                         :response handle-error}}
        :methods {:post
-                 {:response login-fn
+                 {:response (fn [{:keys [parameters request]}]
+                              (login-fn parameters request))
                   :consumes "application/edn"
                   :produces "application/edn"}}}
       (yada/resource)
@@ -158,7 +163,7 @@
                         ;; todo: don't do this in production
                         :response handle-error}}
        :methods {:get ; only get or post will be allowed
-                 {:response logout-fn
+                 {:response (fn [ctx] (logout-fn (:request ctx)))
                   :consumes "application/edn"
                   :produces "application/edn"}}}
       (yada/resource)
@@ -206,37 +211,41 @@
 
 (defn routes [req-handlers shield]
   ;; if query is nil/not given, 404 will be the response to ./query
+  ;; todo what is schema for callable
   (let [{:keys [:login
                 :logout
                 :commands
                 :query
-                :query-schema
                 :event-stream
                 :mount-path]
-         :or {:query-schema []
-              :mount-path "/api"
-              :commands []
-              :logout (fn [ctx] "")}} req-handlers]
+         :or {:mount-path "/api"
+              :logout (fn [req] "")}} req-handlers]
     [mount-path
      [
-      ["/command"
-       (command-handler commands shield)
-       :bones/command]
-      ["/commands"
-       (command-list-handler commands)
-       :bones/commands]
-      ["/query"
-       (query-handler query query-schema shield)
-       :bones/query]
-      ["/login"
-       (login-handler login shield)
-       :bones/login]
-      ["/logout"
-       (logout-handler logout shield)
-       :bones/logout]
-      ["/events"
-       (event-stream-handler event-stream shield)
-       :bones/event-stream]
+      (if commands
+        ["/command"
+         (command-handler commands shield)
+         :bones/command])
+      (if commands
+        ["/commands"
+         (command-list-handler commands)
+         :bones/commands])
+      (if query
+        ["/query"
+         (apply query-handler (conj query shield))
+         :bones/query])
+      (if login
+        ["/login"
+         (apply login-handler (conj login shield))
+         :bones/login])
+      (if login
+        ["/logout"
+         (logout-handler logout shield)
+         :bones/logout])
+      (if event-stream
+        ["/events"
+         (event-stream-handler event-stream shield)
+         :bones/event-stream])
       [true
        (not-found-handler)
        :bones/not-found]]]))
