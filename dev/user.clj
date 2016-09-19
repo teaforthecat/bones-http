@@ -15,6 +15,14 @@
     ;; must return the stream
     output-stream))
 
+(defn add-account [args auth-info req]
+  [args auth-info])
+
+(def commands
+  [[:add-account {:account/xact-id s/Int
+                  :account/evo-id (s/maybe s/Int)}
+    add-account]])
+
 (defn login [args req]
   (if (= (:password args) (:username args))
     {:anything "to-identify"}
@@ -23,6 +31,7 @@
 
 (defn start []
   (http/build-system sys {:http/handlers {:login [{:username s/Str :password s/Str} login]
+                                          :commands commands
                                           :query [{:q s/Any} (fn [args auth-info req]
                                                                [args auth-info])]
                                           :event-stream event-stream-handler}

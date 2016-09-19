@@ -73,16 +73,11 @@
               {:status 401}))))
 
 (defn handle-command [ctx]
-  ;; the parameters are empty because the Commands schema didn't work
-  ;; as the :parameters on the resource so we will parse the body ourselves
-  (let [{:keys [authentication request]} ctx
-        command-body (-> (:body request)
-                         (bs/to-string)
-                         (edn/read-string))]
-    (if-let [errors (s/check commands/Command command-body)]
+  (let [{:keys [parameters authentication request]} ctx
+        body (:body parameters)]
+    (if-let [errors (s/check commands/Command body)]
       (assoc (:response ctx) :status 400 :body errors)
-      ;; note: in the command handler, access the :identity on the request for login info
-      (commands/command command-body authentication request))))
+      (commands/command body authentication request))))
 
 (defn command-handler [commands shield]
   ;; hack to ensure registration - abstract-map is experimental
@@ -94,6 +89,7 @@
                              (allow-cors shield))
             :methods {:post
                       {:response handle-command
+                       :parameters {:body {:command s/Keyword :args s/Any}}
                        :consumes "application/edn"
                        :produces "application/edn"}}
             :responses (bad-request-response :body)}) )
