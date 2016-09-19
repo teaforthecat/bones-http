@@ -92,7 +92,8 @@
                   cookie-https-only
                   cookie-max-age
                   token-exp-hours
-                  token-exp-ever?]
+                  token-exp-ever?
+                  cors-allow-origin]
            :or {secret (gen-secret 32)
                 algorithm {:alg :a256kw :enc :a128gcm}
                 cookie-name "bones-session"
@@ -101,6 +102,7 @@
                 cookie-max-age (* 60 60 24 365) ;; one year
                 token-exp-hours (* 24 365) ;; one year
                 token-exp-ever? false
+                cors-allow-origin "http://localhost:3449" ;; for dev
                 }} config]
       (validate-secret secret (:alg algorithm))
       (-> cmp
@@ -110,6 +112,8 @@
           (assoc :token-exp-hours token-exp-hours)
           (assoc :algorithm algorithm)
           (assoc :cookie-backend (session-backend))
+          (assoc :cookie-name cookie-name)
+          (assoc :cors-allow-origin cors-allow-origin)
           ;; ring.middleware.session.cookie says the secret key must be exactly 16 bytes(characters)
           (assoc :cookie-opts {:store (cookie-store {:key cookie-secret})
                                :cookie-name cookie-name

@@ -2,9 +2,6 @@
   (:require [bones.http.core :as http]
             [clojure.test :refer [deftest testing is]]))
 
-;; conf for -main
-;; to block caller indefinitely add:
-;; {:http/service {:join? true}}
 (def sys (atom {}))
 (def conf {:http/auth
            {:secret "a 16 byte stringa 32 byte string"

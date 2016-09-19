@@ -1,31 +1,18 @@
 (ns bones.http.service
-  (:require [io.pedestal.http :as http]
-            [com.stuartsierra.component :as component]
-            [io.pedestal.http :as server]))
+  (:require [com.stuartsierra.component :as component]
+            [aleph.http :as http]
+            [bidi.ring :refer [make-handler]]))
 
-(defn service [routes conf]
-  {:env :prod
-   ::server/join? (or (:join? conf) false) ;; block caller?
-   ::http/routes  routes
-   ::http/resource-path (or (:resource-path conf) "/public")
-   ::http/type :jetty
-   ::http/allowed-origins {:allowed-origins #(some #{"http://localhost:8080"
-                                                     "http://localhost:3449"}
-                                                  [%])
-                           :creds true}
-   ::http/port (or (:port conf) 8080)
-   ::http/container-options {:h2c? true
-                             :h2? false
-                             :ssl? false}})
-
-(defrecord Server [routes conf]
+(defrecord Server [conf routes]
   component/Lifecycle
   (start [cmp]
     (let [config (get-in cmp [:conf :http/service])
-          routes (or (get-in cmp [:routes :routes]) (throw (ex-info "no routes found" {:cmp cmp})))
-          service-map (service routes config)
-          service (server/create-server service-map)]
-      (assoc cmp :server (server/start service))))
+          app (get-in cmp [:routes])]
+      (assoc cmp :server (http/start-server (make-handler (:routes app))
+                                            {:port (or (:port config) 3000)
+                                             :raw-stream? true}))))
   (stop [cmp]
-    (update cmp :server server/stop)))
-
+    (when-let [server (:server cmp)]
+      (.close server))
+    ;; dissoc looses type
+    (assoc cmp :server nil)))

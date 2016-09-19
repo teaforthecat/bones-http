@@ -1,13 +1,14 @@
 # bones.http
 
 
-bones.http is a CQRS implementation built on Pedestal. It offers authentication
-with Buddy and validation with Prismatic Schema. It has the goal of a slim API
-to make getting started as easy as possible.
+bones.http is a CQRS implementation built on
+[yada](https://github.com/juxt/yada). It offers authentication with Buddy and
+validation with Prismatic Schema. It has the goal of a slim API to make getting
+started as easy as possible.
 
 [![Build Status](https://travis-ci.org/teaforthecat/bones.http.svg?branch=master)](https://travis-ci.org/teaforthecat/bones.http)
 
-## Usage
+## Commands
 
 In the beginning there was an atom.
 
@@ -15,148 +16,50 @@ In the beginning there was an atom.
 (def sys (atom {}))
 ```
 
-Then the atom, with an empty configuration, grew into a system that had a web
-server in it.
+Lets say we have a function that writes data to a database, and we want to
+connect it to the web.
 
+We can do this by creating a bones command handler. This is a function that
+takes two arguments, the first is a schema-defined map. The second is also a
+map, and contains identification information gathered from the request.
+
+Here is a contrived example:
 ```clojure
-(require '[bones.http.core :as http])
-(http/build-system sys {})
+(defn new-widget [args auth-info]
+  (let [{:keys [width height]} args
+        {:keys [user-id]} auth-info]
+    (if (insert-into "widgets" width height user-id)
+      :success
+      :error)))
 ```
 
-Once it was started, the system went on to reach out to the web.
+We'd like to be confident that the arguments received are what we want and
+expect.  We accomplish this by providing a schema for this command handler.
 
 ```clojure
-(http/start-system sys)
+(require '[schema.core :as s])
+(defn widget-schema {:width s/Int :height s/Int })
 ```
 
-The web had a lot to say.
+Well give it a name matching the function name, and put it all together into an
+array of properly formatted commands.
 
+```clojure
+;               name         schema         function
+(def commands [[:new-widget widget-schema 'new-widget]])
+```
+
+When bones receives a command it will execute the function of the command
+matching the name given, and pass the args of the request as the first
+parameter. The response body will consist of the return value of this function.
+
+_only edn is accepted currently_
 ```sh
-curl localhost:8080/api/command -X POST -d '{:twitter "words, some news"}' \
+curl localhost:8080/api/command -X POST -d '{:command :new-widget :args {:width 3 :height 5}' \
   -H "Content-Type: application/edn"
 ```
 
-But the system did not even.
-
-```sh
-HTTP/1.1 401 Unauthorized
-```
-
-The system learned of people on the web.
-
-_The return value of the login command will be encrypted in both the session
-cookie and token. Access it on the request (the second argument) like so `(:identity req)`_
-```clojure
-(require '[schema.core :as s]
-(defn i-know-you [args req]
-  (if (= (:username args) (:password args)) ; database call goes here
-    {:you-must-be-twins "do you have any requests?"}))
-(http/register-command :login {:username s/Str :password s/Str} ::i-know-you)
-```
-
-The web complied.
-
-```sh
-curl localhost:8080/api/login -X POST \
-  -d '{:command :login :args {:username "same" :password "same"}}' \
-  -H "Content-Type: application/edn" -i
-```
-
-And they became friends for a maximum of one year.
-
-_Note: Cookie authentication is not working currently, see_
-[issue #2](https://github.com/teaforthecat/bones.http/issues/2)
-```sh
-
-HTTP/1.1 200 OK
-Date: Fri, 12 Aug 2016 14:18:12 GMT
-Strict-Transport-Security: max-age=31536000; includeSubdomains
-X-Frame-Options: DENY
-X-Content-Type-Options: nosniff
-X-XSS-Protection: 1; mode=block
-Content-Type: application/edn
-Set-Cookie: bones-session=pVMJ7uknf%2B5Hbpr2sj1cXAv%2FUw7L4YKhrnGZ0QfPmXh5oc18%2Ba%2FMM1yV7v0NfYLtM22gH9wEjqoLULcGNO%2FEILg%2FiOd6CNJyHlVJueqQPQs%3D--ByFS0EKRdBtOAhUkn6MbBfSOW4jBgmc39vRMHeTo3uI%3D;Path=/;Max-Age=31536000
-Transfer-Encoding: chunked
-Server: Jetty(9.3.8.v20160314)
-
-{:token "eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.vOdZGyjQqsXL89x4StgQuyk28jPaJ-ji.3DcYJLZUbkXvXzPk.jvfS1FeuL4DkNDJIHvQEl8rvSzKKV7US_8Zqybda_cX5a-CpXMGOk_DX4c2ppXfPSA.za5U1C_HBonfezfe4dE2vg"}
-```
-
-```sh
-export TOKEN="eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.vOdZGyjQqsXL89x4StgQuyk28jPaJ-ji.3DcYJLZUbkXvXzPk.jvfS1FeuL4DkNDJIHvQEl8rvSzKKV7US_8Zqybda_cX5a-CpXMGOk_DX4c2ppXfPSA.za5U1C_HBonfezfe4dE2vg"
-```
-
-The system tried to understand what the web wanted.
-
-```clojure
-(def record-todo #'identity) ; database call goes here
-(defn todo [args req]
-  (record-todo (assoc args :user-info (:identity req))))
-(http/register-command :todo {:status (s/enum "new" "done") :text s/Str :place s/Str})
-```
-
-The web gave the system a command.
-
-```sh
-curl localhost:8080/api/command \
-  -d '{:command :todo :args {:status "new" :text "travel to distant lands"}}' \
-  -H "Authorization: Token $TOKEN" -H "Content-Type: application/edn"
-```
-
-But the system needed more information.
-
-```sh
-HTTP/1.1 400 Bad Request
-{:message "args not valid", :data {:args {:place missing-required-key}}}
-```
-
-The web was persistant, and gave the missing information.
-
-```sh
-curl localhost:8080/api/command \
-  -d '{:command :todo :args {:status "new" :text "travel to distant lands" :place "texas"}}' \
-  -H "Authorization: Token $TOKEN" -H "Content-Type: application/edn"
-```
-
-Eventually the system came around.
-
-```sh
-200 OK
-{:status "new", :text "travel to distant lands",
- :place "texas", :user-info {:you-must-be-twins "do you have any requests?"}
-}
-```
-
-And the system was deployed to distant lands.
-...
-
-And reported back various findings.
-
-_only one query handler allowed_
-```clojure
-(def find-findings #'identity) ;database call goes here
-(defn report-findings [args req]
-  (find-findings args))
-(http/register-query-handler ::report-findings {:place s/Str (s/optional-key :todos) (s/enum
-"new" "done")})
-```
-
-The web had many questions.
-
-```sh
-curl "localhost:8080/api/query?place=texas&todos=new" \
-    -H "Authorization: Token $TOKEN" -H "Content-Type: application/edn"
-```
-
-And learned many things.
-
-_there is no database here, we're just echoing back the args_
-```sh
-{:place "texas", :todos "new"}
-```
-
-The end ... or is it?
-https://github.com/teaforthecat/bones
+...more to come
 
 ## License
 

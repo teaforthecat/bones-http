@@ -1,330 +1,257 @@
 (ns bones.http.handlers
-  (:require [com.stuartsierra.component :as component]
-            [clojure.string :as string]
-            [clojure.edn :as edn]
-            [schema.experimental.abstract-map :as abstract-map]
+  (:require [bones.http.commands :as commands]
+            [bones.http.auth :refer [identity-interceptor]]
+            [ring.middleware.params :as params]
+            [compojure.route :as croute]
+            [compojure.response :refer [Renderable]]
+            [aleph.http :as http]
+            [manifold.stream :as ms]
+            [manifold.deferred :as d]
+            [aleph.http :refer [websocket-connection]]
+            [clojure.core.async :as a]
+            [compojure.api.sweet :as api]
+            [yada.yada :as yada]
+            [bidi.ring :refer [make-handler]]
+            [clj-time.core :as t]
+            [clj-time.coerce :refer (to-date)]
             [schema.core :as s]
-            ;;ped
-            [io.pedestal.http.route :as route]
-            [io.pedestal.interceptor :refer [interceptor]]
-            [io.pedestal.http.ring-middlewares :as middlewares]
-            [io.pedestal.http.content-negotiation :as cn]
-            [io.pedestal.http.body-params :as body-params]
-            [io.pedestal.http.sse :as sse]
-            [io.pedestal.interceptor.helpers :as helpers]
-            [ring.util.response :as ring-resp]
-            [bones.http.auth :as auth]))
+            [schema.experimental.abstract-map :as abstract-map]
+            [clojure.edn :as edn]
+            [byte-streams :as bs]
+            [com.stuartsierra.component :as component]))
 
-(s/defschema Command
-  (abstract-map/abstract-map-schema
-   :command
-   {:args {s/Keyword s/Any}}))
+(defn allow-cors [shield]
+  {:allow-origin (:cors-allow-origin shield)
+   :allow-credentials true
+   :allow-methods #{:get :post}
+   :allow-headers ["Content-Type" "Authorization"]})
 
-;; todo register multiple query handlers
-;; remove?
-;; this gets redefined in `register-query-handler'
-(s/defschema Query
-  {:q s/Any
-   (s/optional-key :type) s/Str
-   s/Keyword s/Any})
+(defn authenticate [auth-fn cookie-name]
+  (fn [ctx]
+    (let [token (get-in ctx [:cookies cookie-name])
+          ;; hack to use the token as the cookie
+          request (update-in (:request ctx)
+                             [:headers "authorization"]
+                             #(or % (str "Token " token)))]
+      (:identity (auth-fn request)))))
 
-;; a default is not needed due to the `check-command-exists' interceptor
-(defmulti command :command)
+(defn require-login [shield]
+  (let [auth-fn (identity-interceptor shield)
+        cookie-name (:cookie-name shield)]
+    {:authentication-schemes [{:verify (authenticate auth-fn cookie-name)}
+                              ]
+     :authorization {:scheme :bones/authorize}}))
 
-(defn add-command
-  "ensure a unique command is created based on a name spaced keyword"
-  [command-name schema]
-  (let [varname (-> command-name
-                    str
-                    (string/replace "/" "-")
-                    (string/replace "." "-")
-                    (subs 1)
-                    (str "-schema")
-                    (symbol))]
-    (abstract-map/extend-schema! Command
-                                 {:args schema}
-                                 varname
-                                 [command-name])))
+(defn handler [resource]
+  (yada/handler
+   (yada/resource resource)))
 
-(defn resolve-command [command-name]
-  (let [nmspc (namespace command-name)
-        f     (name command-name)]
-    (if nmspc
-      (ns-resolve (symbol nmspc) (symbol f))
-      (resolve (symbol f)))))
+(defn parse-schema-error [ctx]
+  (->> ctx :error ex-data :errors first (apply hash-map)))
 
-(defn register-command
-  "the command can have the same name of the function (implicit) - it must also
-  have the same namespace as the call of this `register-command' function, or a third
-  argument can be given that resolves to a function in another namespace, that
-  way the command-name can be different from the function name if desired.
+(defn schema-response [param-type ctx]
+  ; param-type is where the schema validation error ends up: query,body,form
+  (if-let [schema-error (param-type (parse-schema-error ctx))]
+    (get schema-error :error "schema error not found")
+    "there was an error parsing the request"))
 
-    * resolves a keyword to a function
-    * adds a method to `command'
-    * adds a schema to `Command'"
-  ([command-name schema]
-   (register-command command-name schema command-name))
-  ([command-name schema explicit-handler]
-   (let [command-handler (resolve-command explicit-handler)]
-     (if (nil? command-handler)
-       (throw (ex-info "could not resolve command to a function" {:command explicit-handler})))
-     (add-command command-name schema)
-     (defmethod command command-name [command req]
-       (command-handler (:args command) req)))))
+(defn bad-request-response [param-type]
+  {400 {
+        :produces "application/edn"
+        :response (partial schema-response param-type)}
+   401 {:produces "application/edn"
+        :response "not authorized"}})
 
-(defn register-commands [commands]
-  (map (partial apply register-command) commands))
+(defmethod yada.authorization/validate
+  :bones/authorize
+  ;; bare minimum to get a 401 response
+  [ctx credentials authorization]
+  (if credentials
+    ctx
+    (d/error-deferred
+     (ex-info "authorization required"
+              {:status 401}))))
 
-(defn register-query-handler [explicit-handler schema]
-  (let [user-query-handler (resolve-command explicit-handler)]
-    (if (nil? user-query-handler)
-      (throw (ex-info "could not resolve query to a function" {:query explicit-handler})))
-    ;; todo register multiple query handlers
-    (s/defschema Query schema)
-    (defn query [query-params req]
-      (user-query-handler query-params req))))
+(defn handle-command [ctx]
+  (let [{:keys [parameters authentication request]} ctx
+        body (:body parameters)]
+    (if-let [errors (s/check commands/Command body)]
+      (assoc (:response ctx) :status 400 :body errors)
+      (commands/command body authentication request))))
 
-;; remove?
-(defn echo "built-in sanity check" [args req] args)
-;; remove?
-(register-command :echo {s/Any s/Any})
+(defn command-handler [commands shield]
+  ;; hack to ensure registration - abstract-map is experimental
+  ;; if the print is removed, for some reason(!), the commands don't get registered
+  (pr-str (commands/register-commands commands))
+  (handler {:id :bones/command
+            :access-control (merge
+                             (require-login shield)
+                             (allow-cors shield))
+            :methods {:post
+                      {:response handle-command
+                       :parameters {:body {:command s/Keyword :args s/Any}}
+                       :consumes "application/edn"
+                       :produces "application/edn"}}
+            :responses (bad-request-response :body)}) )
 
-(defn registered-commands
-  "a bare bones, low-level introspection utility"
-  []
-  (->> Command
-       abstract-map/sub-schemas
-       ;; login should probably be filtered out?
-       (map (fn [sub]
-              (:extended-schema (second sub))))))
+(defn command-list-handler [commands]
+  (handler {:id :bones/command-list
+            :properties {:last-modified (to-date (t/now))}
+            :methods {:get
+                      ;; only show the command name and args schema
+                      ;; todo: expand on this or replace with swagger
+                      {:response (map #(take 2 %) commands)
+                       :produces "application/edn"}}}))
 
-(defn body [ctx]
-  (-> ctx
-      :request
-      :body-params))
+(defn query-handler [query-schema query-fn shield]
+  (handler {:id :bones/query
+            :parameters {:query query-schema}
+            :access-control (merge
+                             (require-login shield)
+                             (allow-cors shield))
+            :methods {:get
+                      {:response (fn [{:keys [parameters authentication request]}]
+                                   (query-fn parameters authentication request))
+                       :consumes "application/edn"
+                       :produces "application/edn"}}
+            :responses (bad-request-response :query)}))
 
-(defn get-req-command [ctx]
-  (:command (body ctx)))
+(defn encrypt-response [shield ctx]
+  (if (= :options (:method ctx));;cors pre-flight
+    ctx
+    (let [cookie-name (:cookie-name shield)
+          data (get-in ctx [:response :body])
+          ;; todo: enforce login-fn to return a map
+          token (.token shield (if (map? data) data {:data data}))]
+      (-> ctx
+          (assoc-in [:response :cookies] {cookie-name token})
+          (assoc-in [:response :body] {"token" token})))))
 
-(defn command-handler [req]
-  (command (:body-params req) req))
+(defn unset-cookie [shield ctx]
+  (let [cookie-name (:cookie-name shield)]
+    (assoc-in ctx [:response :cookies] {cookie-name ""})))
 
-(defn command-list-handler [_]
-  {:available-commands (registered-commands)})
+(defn handle-error [ctx]
+  ;; bare minimum to show it
+  (pr-str (:error ctx)))
 
-(defn token-interceptor [shield]
-  (interceptor {:name :bones/token-interceptor
-                :leave (fn [ctx]
-                         ;; assuming authentic user data in response
-                         ;; returned from registered :login command
-                         ;; the session ends up in a Set-Cookie header
-                         ;; the token ends up in the response body
-                         (let [user-data (:response ctx)]
-                           (assoc ctx :response {:session {:identity user-data}
-                                                 :token (auth/token shield user-data)})))}))
+(defn login-handler [login-schema login-fn shield]
+  (-> {:id :bones/login
+       :access-control (allow-cors shield)
+       :responses {500 {:produces "text/plain"
+                        ;; todo: don't do this in production
+                        :response handle-error}}
+       :methods {:post
+                 {:response (fn [{:keys [parameters request]}]
+                              (login-fn parameters request))
+                  :consumes "application/edn"
+                  :produces "application/edn"}}}
+      (yada/resource)
+      (yada.resource/insert-interceptor
+       yada.interceptors/create-response
+       (partial encrypt-response shield))
+      (yada/handler)))
 
-(defn login-handler [req]
-    (if (= :login (get-in req [:body-params :command]))
-      (let [user-data (command (:body-params req) req)]
-        (if user-data
-          user-data
-          (throw (ex-info "Invalid Credentials" {:status 400}))))
-      (throw (ex-info "Invalid Command" {:status 400}))))
+(defn logout-handler [logout-fn shield]
+  (-> {:id :bones/login
+       :access-control (allow-cors shield)
+       :responses {500 {:produces "text/plain"
+                        ;; todo: don't do this in production
+                        :response handle-error}}
+       :methods {:get ; only get or post will be allowed
+                 {:response (fn [ctx] (logout-fn (:request ctx)))
+                  :consumes "application/edn"
+                  :produces "application/edn"}}}
+      (yada/resource)
+      (yada.resource/insert-interceptor
+       yada.interceptors/create-response
+       (partial unset-cookie shield))
+      (yada/handler)))
 
-;; todo register multiple query handlers somehow
-;; remove?
-;; this gets overwritten by `register-query-handler'
-(defn query [params req]
-  (let [q (:q params)]
-    {:results (edn/read-string q)}))
+(defn format-event [{:keys [event data id] :as datum :or {data datum}}]
+  ;; allows map of sse keys or just anything as data to be str'd
+  ;; todo: do non-integer id's break the client?
+  ;; note: a map with :event or :id keys, without :data, may not be what you want
+  ;; note: in this order, it doesn't matter if the data is already a string that
+  ;;   ends with a newline because _at least_ one blank line separates events
+  (cond-> ""
+    event (str "event: " event "\n")
+    id    (str "id: " id "\n")
+    true  (str "data: " data "\n\n")))
 
-(defn query-handler [req]
-  (query (:query-params req) req))
+(defn handle-event-stream [event-fn]
+  (fn [ctx]
+    (let [auth-info (:authentication ctx)
+          req (:request ctx)
+          source (event-fn req auth-info)]
+      (ms/transform (map format-event)
+                    source))))
 
-(defn identity-interceptor [shield]
-  ;; sets request :identity to data of decrypted "Token" in the "Authorization" header
-  ;; sets request :identity to data of :identity in session cookie
-  (helpers/on-request :bones.auth/identity
-                      (auth/identity-interceptor shield)))
+(defn event-stream-handler [event-fn shield]
+  (handler {:id :bones/event-stream
+            :access-control (merge (require-login shield)
+                                   (allow-cors shield))
+            :methods {:get
+                      {:produces "text/event-stream"
+                       :response (handle-event-stream event-fn)}}}))
 
-(defn session [shield]
-  ;; interceptor
-  ;; sets request :session to decrypted data in the session cookie
-  ;; sets cookie to encrypted value of data in request :session
-  (middlewares/session (:cookie-opts shield)))
+(defn not-found-handler []
+  (handler {:id :bones/not-found
+            :methods {:* nil}
+            :properties {:exists? false}
+            :responses {404 {
+                             :produces #{"application/edn"
+                                         "application/json"
+                                         "text/plain"}
+                             :response "not found"}}}))
 
-(def check-command-exists
-  (interceptor {:name :bones/check-command-exists
-                :enter (fn [ctx]
-                         (let [commands (-> Command abstract-map/sub-schemas keys)
-                               cmd (get-req-command ctx)]
-                           (if (some #{cmd} commands)
-                             ctx ;;do nothing
-                             (throw (ex-info "command not found"
-                                             {:status 400
-                                              :message (str "command not found: " cmd)
-                                              :available-commands commands})))))}))
+(defn routes [req-handlers shield]
+  ;; if query is nil/not given, 404 will be the response to ./query
+  ;; todo what is schema for callable
+  (let [{:keys [:login
+                :logout
+                :commands
+                :query
+                :event-stream
+                :mount-path]
+         :or {:mount-path "/api"
+              :logout (fn [req] "")}} req-handlers]
+    [mount-path
+     [
+      (if commands
+        ["/command"
+         (command-handler commands shield)
+         :bones/command])
+      (if commands
+        ["/commands"
+         (command-list-handler commands)
+         :bones/commands])
+      (if query
+        ["/query"
+         (apply query-handler (conj query shield))
+         :bones/query])
+      (if login
+        ["/login"
+         (apply login-handler (conj login shield))
+         :bones/login])
+      (if login
+        ["/logout"
+         (logout-handler logout shield)
+         :bones/logout])
+      (if event-stream
+        ["/events"
+         (event-stream-handler event-stream shield)
+         :bones/event-stream])
+      [true
+       (not-found-handler)
+       :bones/not-found]]]))
 
-(def check-args-spec
-  (interceptor {:name :bones/check-args-spec
-                :enter (fn [ctx]
-                         (if-let [error (s/check Command (body ctx))]
-                           (throw (ex-info "args not valid" (assoc error :status 400)))
-                           ctx))}))
-
-(def check-query-params-spec
-  (interceptor {:name :bones/check-query-params-spec
-                :enter (fn [ctx]
-                         (if-let [error (s/check Query (get-in ctx [:request :query-params] {}))]
-                           (throw (ex-info "query params not valid" (assoc error :status 400)))
-                           ctx))}))
-
-(defn respond-with [response content-type]
-  (let [session (:session response)]
-    (-> (dissoc response :session) ;;body
-        ring-resp/response
-        (assoc :session session) ;; new session info for Set-Cookie header
-        (ring-resp/content-type content-type))))
-
-(defmulti render
-  "render content-types, extensible, relies on io.pedestal.http.content-negotiation.
-  dispatch-val will be a valid content-type string
-  recommended to call (respond-with rendered dispatch-val)"
-  #(get-in % [:request :accept :field]))
-
-(defmethod render :default ;; both? "application/edn" configurable?
-  [ctx]
-  (update-in ctx [:response] #(respond-with % "application/edn")))
-
-;; (defmethod render "text/event-stream"
-;;   [ctx]
-;;   (if (ms/source? (:response ctx))
-;;     (let [stream-ready-fn #((ms/connect (:response ctx)
-;;                                         (:response-channel ctx)))]
-;;       (sse/start-stream stream-ready-fn context heartbeat-delay bufferfn-or-n opts))
-;;     (throw (ex-info "source not given for text/event-stream" {:status 500}))))
-
-(def renderer
-  (interceptor {:name :bones/renderer
-                :leave (fn [ctx] (render ctx))}))
-
-(def body-params
-  "shim for the body-params interceptor, stuff the result into a single
-  key on the request `body-params' for ease of use"
-  (interceptor {:name :bones/body-params
-                :enter (fn [ctx]
-                         (update ctx
-                                 :request (fn [req]
-                                            (assoc req
-                                                   :body-params (or (:edn-params req)
-                                                                    (:json-params req)
-                                                                    (:transit-params req)
-                                                                    (:form-params req))))))}))
-
-(def error-responder
-  ;; get status of the nested(thrown) exception's ex-data for specialized http responses
-  (interceptor {:name :bones/error-responder
-                :error (fn [ctx ex]
-                         (let [exception (-> ex ex-data :exception) ;; nested exception
-                               data (ex-data exception)
-                               status (or (:status data) 500)
-                               resp {:message (.getMessage exception)}
-                               response (if (empty? (dissoc data :status))
-                                          resp
-                                          (assoc resp :data (dissoc data :status)))]
-                           (-> (assoc ctx :response response) ;; sets body
-                               (render) ;; sets content-type
-                               (update :response assoc :status status))))}))
-
-(defn get-resource-interceptors []
-  ^:interceptors
-  ['bones.http.handlers/error-responder ;; must come first
-   (cn/negotiate-content ["application/edn"])
-   'bones.http.handlers/renderer])
-
-(defn command-resource
-  "# post request handler
-    * uses `Command' schema for validation
-    * requires exclusively `:command' and `:args' keys in post body
-    * hands off `:args' of post body to `:command'
-    * commands are registered with `register-command'"
-  [conf shield]
-  [:bones/command
-   ;; need to use namespace so this can be called from a macro (defroutes)
-   ^:interceptors ['bones.http.handlers/error-responder              ; request ; must come first
-                   (cn/negotiate-content ["application/edn"])        ; request
-                   (bones.http.handlers/session shield)              ; auth
-                   (bones.http.handlers/identity-interceptor shield) ; auth
-                   'bones.http.auth/check-authenticated              ; auth
-                   (body-params/body-params)                         ; post
-                   'bones.http.handlers/body-params                  ; post
-                   'bones.http.handlers/check-command-exists         ; command
-                   'bones.http.handlers/check-args-spec              ; command
-                   'bones.http.handlers/renderer                     ; response
-                   ]
-   'bones.http.handlers/command-handler])
-
-(defn command-list-resource [conf shield]
-  ;; need to use namespace so this can be called from a macro (defroutes)
-  [:bones/command-list (get-resource-interceptors) 'bones.http.handlers/command-list-handler])
-
-(defn login-resource [conf shield]
-  ;; need to use namespace so this can be called from a macro (defroutes)
-  [:bones/login
-   ^:interceptors ['bones.http.handlers/error-responder           ; request ; must come first
-                   (cn/negotiate-content ["application/edn"])     ; request
-                   (bones.http.handlers/session shield)           ; auth
-                   (body-params/body-params)                      ; post
-                   'bones.http.handlers/body-params               ; post
-                   'bones.http.handlers/check-command-exists      ; login   ; :login should be registered
-                   'bones.http.handlers/check-args-spec           ; login   ; user defined login parameters
-                   'bones.http.handlers/renderer                  ; response
-                   (bones.http.handlers/token-interceptor shield) ; response ; before response
-                   ]
-   'bones.http.handlers/login-handler])
-
-(defn query-resource [conf shield]
-  ;; need to use namespace so this can be called from a macro (defroutes)
-  [:bones/query
-   ^:interceptors ['bones.http.handlers/error-responder              ; request ; must come first
-                   (cn/negotiate-content ["application/edn"])        ; request
-                   (bones.http.handlers/session shield)              ; auth
-                   (bones.http.handlers/identity-interceptor shield) ; auth
-                   'bones.http.auth/check-authenticated              ; auth
-                   'bones.http.handlers/check-query-params-spec      ; query
-                   'bones.http.handlers/renderer                     ; response
-                   ]
-   'bones.http.handlers/query-handler])
-
-(defn event-stream-resource [conf shield event-stream-handler]
-  ;; need to use namespace so this can be called from a macro (defroutes)
-  [:bones/event-stream
-   ^:interceptors ['bones.http.handlers/error-responder              ; request ; must come first
-                   (cn/negotiate-content ["text/event-stream"])      ; request
-                   (bones.http.handlers/session shield)              ; auth
-                   (bones.http.handlers/identity-interceptor shield) ; auth
-                   'bones.http.auth/check-authenticated              ; auth
-                   ]
-   (sse/start-event-stream event-stream-handler)])
-
-(defrecord CQRS [conf shield]
+(defrecord App [conf shield]
   component/Lifecycle
   (start [cmp]
-    (let [config (get-in cmp [:conf :http/handlers])
-          auth-sheild (:shield cmp)]
-      (-> cmp
-          (assoc :routes
-                 (route/expand-routes
-                  [[[(or (:mount-path config) "/api")
-                     ["/command"
-                      {:post (command-resource config auth-sheild)
-                       :get (command-list-resource config auth-sheild)}]
-                     ["/query"
-                      {:get (query-resource config auth-sheild)}]
-                     (if-let [event-stream-handler (:event-stream-handler config)]
-                       ["/events"
-                        {:get (event-stream-resource config
-                                                     auth-sheild
-                                                     event-stream-handler)}])
-                     ["/login"
-                      {:post (login-resource config auth-sheild)}]]]]))))))
+    (let [handlers (get-in cmp [:conf :http/handlers])
+          auth-shield (:shield cmp)]
+      (assoc cmp :routes (routes handlers auth-shield)))))
+
+(defn app [handlers shield]
+  (make-handler (routes handlers shield)))
