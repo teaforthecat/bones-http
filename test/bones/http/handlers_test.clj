@@ -33,8 +33,6 @@
 
 (def query-schema {:name s/Str})
 
-;;(reduce max (map count (:arglists  (meta #'query-handler))))
-
 (defn login-handler [args req]
   [args "Welcome"])
 
@@ -64,8 +62,8 @@
 ;; start setup
 (def shield (.start (auth/map->Shield {:conf conf})))
 
-(defn new-app []
-  (handlers/app test-handlers shield))
+(defn new-app [& opts]
+  (handlers/app (merge test-handlers (apply array-map opts )) shield))
 
 (def valid-token
   ;; this token was encrypted from the login response
@@ -167,7 +165,18 @@
       (has response
            :status 400
            :headers {"content-length" "49", "content-type" "application/edn"}
-           :body "{:name missing-required-key, \"q\" disallowed-key}\n"))))
+           :body "{:name missing-required-key, \"q\" disallowed-key}\n")))
+  (testing "with any-any schema"
+    (let [app (new-app :query [{} query-handler])
+          response (api-get app "/api/query" {})]
+      (has response
+           :status 200)))
+  (testing "returns an empty string"
+    (let [app (new-app :query [{} (fn [_ _ _] nil)])
+          response (api-get app "/api/query" {})]
+      (has response
+           :body "wat"
+           :status 200))))
 
 (deftest login
   (testing "set-cookie"
