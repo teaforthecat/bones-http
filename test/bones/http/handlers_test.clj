@@ -191,7 +191,7 @@
       (is (= (get (:headers response) "content-type") "application/edn"))
       (is (contains? (:headers response) "set-cookie"))
       (is (= "token"  (re-find #"token" (:body response))))))
-  (testing "returns 404 when nil"
+  (testing "returns 400 when nil"
     (let [app (new-app :login [login-schema (fn [_ _] nil)])
           response (api-post app "/api/login" {:username "abc" :password "123"})]
       (has response
@@ -207,13 +207,7 @@
            :headers (secure-and {"content-length" "7"
                                  "content-type" "application/edn"
                                  "set-cookie" '("pizza=")})
-           :body "goodbye")))
-
-  (testing "returns 404 when nil"
-     (let [app (new-app :login [{} (fn [_ _ _] nil)])
-           response (api-get app "/api/query" {})]
-       (has response
-            :status 404))))
+           :body "goodbye"))))
 
 (deftest commands
   (testing "valid command"
