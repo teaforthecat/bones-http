@@ -97,8 +97,8 @@ request to the logout resource, which will clear the cookie with another
 "Set-Cookie" header.
 
 To make authenticated API requests use a header called "Authorization" with a
-value of the encoded data prefixed with "Token " like this: `Authorization:
-"Token WYdJ21cgv2g-2BlNkgdyYv.."`
+value of the encoded data prefixed with "Token " like this: `"Authorization:
+ Token WYdJ21cgv2g-2BlNkgdyYv.."`
 
 
 _The "Authorization" header has a precedent in basic authentication, and Buddy
