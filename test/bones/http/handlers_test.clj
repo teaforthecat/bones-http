@@ -172,11 +172,16 @@
       (has response
            :status 200)))
   (testing "returns an empty string"
+    (let [app (new-app :query [{} (fn [_ _ _] "")])
+          response (api-get app "/api/query" {})]
+      (has response
+           :body ""
+           :status 200)))
+  (testing "returns an empty string"
     (let [app (new-app :query [{} (fn [_ _ _] nil)])
           response (api-get app "/api/query" {})]
       (has response
-           :body "wat"
-           :status 200))))
+           :status 404))))
 
 (deftest login
   (testing "set-cookie"
