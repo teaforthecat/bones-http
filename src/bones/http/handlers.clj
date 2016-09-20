@@ -29,7 +29,7 @@
 (defn authenticate [auth-fn cookie-name]
   (fn [ctx]
     (let [token (get-in ctx [:cookies cookie-name])
-          ;; hack to use the token as the cookie
+          ;; hack to use the cookie as the token
           request (update-in (:request ctx)
                              [:headers "authorization"]
                              #(or % (str "Token " token)))]
@@ -126,7 +126,8 @@
             :responses (bad-request-response :query)}))
 
 (defn encrypt-response [shield ctx]
-  (if (= :options (:method ctx));;cors pre-flight
+  (if (or (= :options (:method ctx));;cors pre-flight
+          (= 401 (get-in ctx [:response :status]))) ;; invalid credentials
     ctx
     (let [cookie-name (:cookie-name shield)
           data (get-in ctx [:response :body])
@@ -151,8 +152,10 @@
                         ;; todo: don't do this in production
                         :response handle-error}}
        :methods {:post
-                 {:response (fn [{:keys [parameters request]}]
-                              (login-fn parameters request))
+                 {:response (fn [{:keys [parameters request] :as ctx}]
+                              (if-let [result (login-fn parameters request)]
+                                result
+                                (assoc (:response ctx) :status 401 :body "invalid credentials")))
                   :consumes "application/edn"
                   :produces "application/edn"}}}
       (yada/resource)

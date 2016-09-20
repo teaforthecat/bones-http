@@ -36,8 +36,8 @@ expect.  We accomplish this by providing a schema for this command handler.
 (defn widget-schema {:width s/Int :height s/Int })
 ```
 
-We'll give it a name matching the function name, and put it all together into an
-array of properly formatted commands.
+We'll give it a name, and put it all together into a list of properly
+formatted commands.
 
 ```clojure
 ;               name         schema         function
