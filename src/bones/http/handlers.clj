@@ -51,9 +51,15 @@
 
 (defn schema-response [param-type ctx]
   ; param-type is where the schema validation error ends up: query,body,form
-  (if-let [schema-error (param-type (parse-schema-error ctx))]
-    (get schema-error :error "schema error not found")
-    "there was an error parsing the request"))
+  (let [schema-error (param-type (parse-schema-error ctx))
+        param-error (-> ctx :error ex-data :error)]
+    (cond
+      schema-error
+      (get schema-error :error "schema error not found")
+      param-error
+      (pr-str param-error)
+      :else
+      "there was an error parsing the request")))
 
 (defn bad-request-response [param-type]
   {400 {
@@ -74,7 +80,10 @@
 
 (defn handle-command [ctx]
   (let [{:keys [parameters authentication request]} ctx
-        body (:body parameters)]
+        body (:body parameters)
+        ;; yada won't parse body if if the Content-Length header is not provided
+        ;; we could require it, but we can also fall back to parsing it ourselves
+        body (or body (edn/read-string (bs/to-string (:body (:request ctx)))))]
     (if-let [errors (s/check commands/Command body)]
       (assoc (:response ctx) :status 400 :body errors)
       (commands/command body authentication request))))

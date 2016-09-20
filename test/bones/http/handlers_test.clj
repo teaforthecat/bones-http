@@ -103,16 +103,22 @@
   (GET app path params valid-token))
 
 (defn POST [app path params headers]
-  (-> (p/session app)
-      (p/request path
-                 :request-method :post
-                 :content-type "application/edn"
-                 :headers headers
-                 :body (pr-str params))
-      (get-response)))
+  (let [body (pr-str params)]
+    (-> (p/session app)
+        (p/request path
+                   :request-method :post
+                   :content-type "application/edn"
+                   :headers (merge headers
+                                   ;; required for parameter parsing
+                                   {"Content-Length" (count body)})
+                   :body body)
+        (get-response))))
 
 (defn api-post [app path params]
   (POST app path params valid-token))
+
+(defn post-command [data]
+  (api-post (new-app) "/api/command" data))
 
 (defn OPTIONS [app path]
   (-> (p/session app)
@@ -131,7 +137,7 @@
 
 ;; start tests
 
-(deftest get-commands
+(deftest commands
   (let [app (new-app)
         response (GET app "/api/commands" {} {})]
     (has response
@@ -147,7 +153,7 @@
          :headers {"content-length" "9", "content-type" "application/json"}
          :body "not found")))
 
-(deftest get-query
+(deftest query
   (testing "valid params"
     (let [app (new-app)
           response (api-get app "/api/query" {:name "abc"})]
@@ -163,7 +169,7 @@
            :headers {"content-length" "49", "content-type" "application/edn"}
            :body "{:name missing-required-key, \"q\" disallowed-key}\n"))))
 
-(deftest post-login
+(deftest login
   (testing "set-cookie"
     (let [app (new-app)
           response (POST app "/api/login" {:username "abc" :password "123"} {})]
@@ -172,7 +178,7 @@
       (is (contains? (:headers response) "set-cookie"))
       (is (= "token"  (re-find #"token" (:body response)))))))
 
-(deftest get-logout
+(deftest logout
   (testing "unset cookie"
     (let [app (new-app)
           response (GET app "/api/logout" {} {})]
@@ -183,7 +189,7 @@
                                  "set-cookie" '("pizza=")})
            :body "goodbye"))))
 
-(deftest post-command
+(deftest commands
   (testing "valid command"
     (let [app (new-app)
           response (api-post app "/api/command" {:command :who
@@ -199,9 +205,12 @@
       (has response
            :status 400
            :headers (secure-and {"content-length" "70", "content-type" "application/edn"})
-           :body "{:args {:first-name missing-required-key, :last-name disallowed-key}}\n"))))
+           :body "{:args {:first-name missing-required-key, :last-name disallowed-key}}\n")))
+  (testing "empty body"
+    (are [t v] (= t v)
+      "(not (map? \"\"))" (:body (post-command "")))))
 
-(deftest get-events
+(deftest events
   (testing "format events"
     (are [in out] (= out (handlers/format-event in))
       {:event 1 :id 2 :data 3} "event: 1\nid: 2\ndata: 3\n\n"
