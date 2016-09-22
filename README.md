@@ -15,7 +15,7 @@ Lets say we have a function that writes data to a database, and we want to
 connect it to the web.
 
 We can do this by creating a bones command handler. This is a function that
-takes two arguments. The first is a schema-defined map, the second is also a
+takes three arguments. The first is a schema-defined map, the second is also a
 map, and contains identification information gathered from the request.
 
 Here is a contrived example:
@@ -24,8 +24,8 @@ Here is a contrived example:
   (let [{:keys [width height]} args
         {:keys [user-id]} auth-info]
     (if (insert-into "widgets" width height user-id)
-      :success
-      :error)))
+      "yay!"
+      (throw (ex-info "woah" {:status 422 :message "woah there"})))))
 ```
 
 We'd like to be confident that the arguments received are what we want and
@@ -82,13 +82,13 @@ If the "login" function returns nil, the login attempt is taken as invalid and
 an error response is returned.
 
 A valid login response contains a "Set-Cookie" header for the browser. This
-cookie's value is the "auth-info" data encoded with a secret. The encoded data
+cookie's value is the "auth-info" data encoded with a secret. This encoded data
 is also provided in the response as "token". The same encoded data can be used
 to make api requests and to keep a browser session.
 
 Take note of two important things here. Keep the "auth-info" small, there is a
 limit to the cookie size. Keep your secret safe. You'll want to put it into a
-configuration file or environment variable, which we'll cover later...
+configuration file or environment variable.
 
 You can generate a unique random secret with `bones.http.auth/gen-secret`
 
@@ -111,7 +111,7 @@ if mount_point is the default of "/api"
 - GET /api/query
 - GET /api/events
 - GET /api/login
-- GET /api/logout
+- ANY /api/logout
 
 ## Query
 

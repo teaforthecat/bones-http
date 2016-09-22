@@ -58,7 +58,9 @@
         :produces "application/edn"
         :response (partial schema-response param-type)}
    401 {:produces "application/edn"
-        :response "not authorized"}})
+        :response "not authorized"}
+   422 {:produces  "application/edn"
+        :response (fn [ctx] (-> ctx :error ex-data :message))}})
 
 (defmethod yada.authorization/validate
   :bones/authorize

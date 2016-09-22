@@ -44,7 +44,10 @@
 (defn who [args auth-info req]
   {:message (str "Hello" (:first-name args))})
 (defn what [args auth-info req] args)
-(defn where [args auth-info req] args)
+(defn where [args auth-info req]
+  (if (= 5 (:room-no args))
+    (throw (ex-info "occupied" {:status 422 :message "room is occupied"}))
+    "room granted"))
 
 (def commands [[:who {:first-name s/Str} who]
                [:what {:weight-kg s/Int} what]
@@ -228,7 +231,12 @@
            :body "{:args {:first-name missing-required-key, :last-name disallowed-key}}\n")))
   (testing "empty body"
     (are [t v] (= t v)
-      "(not (map? \"\"))" (:body (post-command "")))))
+      "(not (map? \"\"))" (:body (post-command ""))))
+  (testing "throwing exception"
+    (let [response (post-command {:command :where :args {:room-no 5}})]
+      (has response
+           :status 422
+           :body "room is occupied"))))
 
 (deftest events
   (testing "format events"

@@ -76,8 +76,6 @@
         token (get-in ctx [:cookies cookie-name])
         request (:request ctx)]
     ;; get the same token that is in the Authorization header from the cookie
-    (println token)
-    ;; {:cheap "cookie"}
     (if token
       (proto/-authenticate token-backend {} token))))
 
