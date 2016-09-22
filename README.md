@@ -116,10 +116,10 @@ if mount_point is the default of "/api"
 ## Query
 
 Let's say we have a function that gets data from a database. We'll connect this
-function to the web by creating a query handler. The first parameter will be the
-parsed query string from the web request. This query string has a schema
-attached to it. This can be anything, as with the commands. Instead of a list
-though, there is only one query handler.
+function to the web by creating a query handler. This is a function that takes
+three arguments, similarly to the command handler. The first parameter will be
+the parsed query string from the web request, conformed to a schema. The second
+is the auth-info, and the third is the whole request.
 
 ```clojure
 (defn list-widgets [args auth-info request]
@@ -127,6 +127,14 @@ though, there is only one query handler.
     (if results
       (render results)
       :no-results)))
+```
+
+We'll add this function to the configuration as well (see below), though there
+is only one query handler.
+
+```clojure
+;            schema     function
+(def query [{:q s/Any} query-handler])
 ```
 
 ## SSE Event Stream
