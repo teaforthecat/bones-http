@@ -6,7 +6,10 @@
             [buddy.auth.backends.session :refer [session-backend]]
             [buddy.auth.middleware :refer [wrap-authentication wrap-authorization]]
             [buddy.hashers :as hashers]
+            [buddy.auth.protocols :as proto]
+            [yada.security :as yada]
             [clj-time.core :as time]
+            [schema.core :as s]
             [ring.middleware.session.cookie :refer [cookie-store]]
             [ring.middleware.session :refer [wrap-session session-request session-response]]
             [ring.middleware.session.store :as store]
@@ -29,8 +32,8 @@
 (defn identity-interceptor [shield]
   ;; identity above refers to buddy's idea of authentication identity
   ;; identity below is clojure.core; to hack the ring middleware for pedestal
-  (let [{:keys [token-backend cookie-backend]} shield]
-    (wrap-authentication identity token-backend cookie-backend)))
+  (let [{:keys [token-backend]} shield]
+    (wrap-authentication identity token-backend)))
 
 ;; thanks! apiga http://stackoverflow.com/a/37356673/714357
 (defn gen-secret
@@ -67,12 +70,31 @@
                    "needed to satisfy ring.middleware.session.cookie; "
                    (format "%s is %d" (pr-str secret) (count secret)))))))
 
+(defmethod yada/verify :bones/cookie
+  [ctx {:keys [:bones/shield] :as scheme}]
+  (let [{:keys [token-backend cookie-name]} shield
+        token (get-in ctx [:cookies cookie-name])
+        request (:request ctx)]
+    ;; get the same token that is in the Authorization header from the cookie
+    (println token)
+    ;; {:cheap "cookie"}
+    (if token
+      (proto/-authenticate token-backend {} token))))
+
+(defmethod yada/verify :bones/token
+  [ctx {:keys [:bones/shield] :as scheme}]
+  (let [{:keys [token-backend]} shield
+        request (:request ctx)]
+    (if-let [token (proto/-parse token-backend request)]
+      (proto/-authenticate token-backend {} token))))
+
 (defprotocol Token
   (token [this data]))
 
 (defrecord Shield [conf]
   Token
   (token [cmp data]
+    (s/validate {s/Any s/Any} data)
     (let [exp? (:token-exp-ever cmp)
           hours (:token-exp-hours cmp)
           secret (:secret cmp)

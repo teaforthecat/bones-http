@@ -4,22 +4,42 @@
             [ring.middleware.session.store :as store]
             [ring.util.codec :as codec]
             [clojure.test :refer [deftest testing is]]
-            [buddy.core.nonce :as nonce]))
-
-(def conf {:http/auth {:secret (nonce/random-bytes 32)
-                       :cookie-name "pizza"}})
+            [buddy.core.nonce :as nonce]
+            [yada.security :as yada]))
 
 (def valid-secret (apply str (map char (range 32))))
 
-(defn session [shield data]
-  (let [{:keys [cookie-opts cookie-secret]} shield]
-    (store/write-session (:store cookie-opts) cookie-secret data)))
+(def conf {:http/auth {:secret valid-secret
+                       :cookie-name "pizza"}})
 
-(defn read-session [shield sess]
-  (let [{:keys [cookie-opts]} shield]
-    (store/read-session (:store cookie-opts) sess)))
+(def shield (.start (auth/map->Shield {:conf conf})))
 
-(def session-info {:identity {:xyz 123}})
+;; made from `valid-scret'
+(def valid-token "eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-C0-WezDMykhd8LnhOuY6IyB5z6LnPdu.hqNtqBvALHaZljhf.OO9TxVojKVRqku1OQw.DZ8uaDZD6ZSMvDcCDXEkIw")
+
+(deftest token
+  (testing "valid token in header"
+    (let [token (.token shield {:abc "123"})
+          ctx {:request {:headers {"Authorization" (str "Token " valid-token)}}} ]
+      (is (= {:abc "123"}
+             (yada/verify ctx {:bones/shield shield
+                               :scheme :bones/token})))))
+  (testing "valid token in Cookie"
+    (let [token (.token shield {:abc "123"})
+          ctx {:request {} :cookies {"pizza" token}}]
+      (is (= {:abc "123"}
+             (yada/verify ctx {:bones/shield shield
+                               :scheme :bones/cookie})))))
+  (testing "invalid token in header"
+    (let [ctx {:request {:headers {"Authorization" (str "Token " "something-else")}}} ]
+      (is (= nil
+             (yada/verify ctx {:bones/shield shield
+                               :scheme :bones/token})))))
+  (testing "invalid token in cookie"
+    (let [ctx {:request {} :cookies {"pizza" "something-else"}}]
+      (is (= nil
+             (yada/verify ctx {:bones/shield shield
+                               :scheme :bones/cookie}))))))
 
 ;; taken from ring.middleware.session.cookie
 (defn- valid-secret-key? [key]
@@ -43,27 +63,3 @@
     (let [secret (auth/gen-secret)]
       (is (= true (valid-secret-key? (.getBytes (auth/limited-secret secret 16))))))))
 
-(deftest request-session
-  (let [shield (.start (auth/map->Shield conf))]
-    (testing "given an empty request and response, sets identity to nil"
-      (let [req ((auth/identity-interceptor shield) {} )]
-        (is (= {:identity nil} req))))
-    (testing "session is readable and writable"
-      (is (= (read-session shield (session shield session-info)) session-info)))))
-
-
-(deftest test-shield
-  (testing "workable defaults"
-    (let [shield (.start (auth/map->Shield conf))]
-      (testing "extacts data from token to identity"
-        ;; all token data ends up in :identity
-        (let [valid-request {:headers {"authorization" (str "Token " (.token shield {:xyz 123}))}}
-              req ((auth/identity-interceptor shield) valid-request)]
-          (is (= 123 (get-in req [:identity :xyz])))))
-      (testing "extracts data from cookie to identity"
-        ;; session data must have data within :identity
-        (let [value (session shield session-info)
-              valid-request {:headers {"cookie" (codec/form-encode {"bones-session" value})}}
-              req ((auth/identity-interceptor shield)
-                   (session-request valid-request (:cookie-opts shield)))]
-          (is (= 123 (get-in req [:identity :xyz]))))))))

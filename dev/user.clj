@@ -2,7 +2,8 @@
   (require [clojure.core.async :as a]
            [schema.core :as s]
            [manifold.stream :as ms]
-           [bones.http.core :as http]))
+           [bones.http.core :as http])
+  (:require [buddy.auth.protocols :as proto]))
 
 ;; the global reload-able system
 (def sys (atom {}))
@@ -17,7 +18,7 @@
     ;; must return the stream
     output-stream))
 
-;; domain function
+;; command handler / your project domain function
 (defn add-account [args auth-info req]
   [args auth-info])
 
@@ -50,8 +51,17 @@
   (http/stop sys))
 
 (comment
-  ;; curl "localhost:8080/api/events" --cookie "bones-session=eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0" -v
   (println "hi")
   (start)
   (stop)
+
+  ;; create token (login)
+  (.token (:shield @sys) {:abc "123"})
+
+  ;; check it
+  (proto/-authenticate (get-in @sys [:shield :token-backend]) {} "eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA") ;;=> {:abc "123"}
+
+  ;; curl localhost:8080/api/events -H "Authorization: Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA"
+
+  ;; curl localhost:8080/api/events --cookie "bones-session=eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA" -v
   )

@@ -26,21 +26,13 @@
    :allow-methods #{:get :post}
    :allow-headers ["Content-Type" "Authorization"]})
 
-(defn authenticate [auth-fn cookie-name]
-  (fn [ctx]
-    (let [token (get-in ctx [:cookies cookie-name])
-          ;; hack to use the cookie as the token
-          request (update-in (:request ctx)
-                             [:headers "authorization"]
-                             #(or % (str "Token " token)))]
-      (:identity (auth-fn request)))))
-
 (defn require-login [shield]
-  (let [auth-fn (identity-interceptor shield)
-        cookie-name (:cookie-name shield)]
-    {:authentication-schemes [{:verify (authenticate auth-fn cookie-name)}
-                              ]
-     :authorization {:scheme :bones/authorize}}))
+  {:authentication-schemes [{:scheme :bones/token
+                             :bones/shield shield}
+                            {:scheme :bones/cookie
+                             :bones/shield shield}]
+   ;; authorization is what returns a 401
+   :authorization {:scheme :bones/authorize}})
 
 (defn handler [resource]
   (yada/handler
@@ -170,10 +162,13 @@
        :responses {500 {:produces "text/plain"
                         ;; todo: don't do this in production
                         :response handle-error}}
-       :methods {:get ; only get or post will be allowed
-                 {:response (fn [ctx] (logout-fn (:request ctx)))
-                  :consumes "application/edn"
-                  :produces "application/edn"}}}
+       ;; strange :* results in a 406
+       :methods (reduce #(assoc %1 %2
+                                {:response (fn [ctx] (logout-fn (:request ctx)))
+                                 :consumes "application/edn"
+                                 :produces "application/edn"})
+                        {}
+                        [:get :post :put :delete])}
       (yada/resource)
       (yada.resource/insert-interceptor
        yada.interceptors/create-response
