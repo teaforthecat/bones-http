@@ -1,4 +1,4 @@
-(ns bones.http.core
+(ns bones.http
   (:require [com.stuartsierra.component :as component]
             [bones.http.auth :as auth]
             [bones.http.handlers :as handlers]

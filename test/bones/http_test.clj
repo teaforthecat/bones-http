@@ -1,5 +1,5 @@
-(ns bones.http.core-test
-  (:require [bones.http.core :as http]
+(ns bones.http-test
+  (:require [bones.http :as http]
             [clojure.test :refer [deftest testing is]]
             [com.stuartsierra.component :as component]
             [schema.core :as s]))
