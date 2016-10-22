@@ -7,6 +7,8 @@
             [peridot.core :as p]
             [clojure.core.async :as a]
             [manifold.stream :as ms]
+            [clj-time.core :as t]
+            [clj-time.format :as tf]
             [aleph.http :as http]
             [byte-streams :as bs]
             [ring.mock.request :refer (request) :rename {request mock-request}]
@@ -201,6 +203,10 @@
            :body "invalid credentials"
            :status 401))))
 
+;; from yada.cookies
+(defn cookie-now []
+  (tf/unparse (tf/formatters :rfc822) (t/now)))
+
 (deftest logout
   (testing "unset cookie"
     (let [app (new-app)
@@ -209,7 +215,8 @@
            :status 200
            :headers (secure-and {"content-length" "7"
                                  "content-type" "application/edn"
-                                 "set-cookie" '("pizza=")})
+                                 ;; luckily this finishes in under a second
+                                 "set-cookie" (list (str "pizza=nil; Expires=" (cookie-now)))})
            :body "goodbye"))))
 
 (deftest commands
