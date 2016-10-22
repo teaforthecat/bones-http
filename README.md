@@ -7,7 +7,7 @@ validation with Prismatic Schema. It has the goal of a slim API to make getting
 started as easy as possible. For a quick implementation example see
 [dev/user.clj](dev/user.clj).
 
-[![Build Status](https://travis-ci.org/teaforthecat/bones.http.svg?branch=master)](https://travis-ci.org/teaforthecat/bones.http)
+[![Build Status](https://travis-ci.org/teaforthecat/bones-http.svg?branch=master)](https://travis-ci.org/teaforthecat/bones-http)
 
 ## Commands
 
