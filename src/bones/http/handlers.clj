@@ -133,7 +133,8 @@
 
 (defn unset-cookie [shield ctx]
   (let [cookie-name (:cookie-name shield)]
-    (assoc-in ctx [:response :cookies] {cookie-name ""})))
+    (assoc-in ctx [:response :cookies] {cookie-name {:value "nil"
+                                                     :expires (to-date (t/now))}})))
 
 (defn handle-error [ctx]
   ;; bare minimum to show it

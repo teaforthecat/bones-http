@@ -76,7 +76,7 @@
         token (get-in ctx [:cookies cookie-name])
         request (:request ctx)]
     ;; get the same token that is in the Authorization header from the cookie
-    (if token
+    (if (not-empty token)
       (proto/-authenticate token-backend {} token))))
 
 (defmethod yada/verify :bones/token
