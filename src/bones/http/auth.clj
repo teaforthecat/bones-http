@@ -63,8 +63,9 @@
     (if n
       (assert (= n (count secret))
               (str "buddy.sign.jwe.cek says the secret key must "
-                   (format  "be exactly %n bytes(characters); " n)
-                   (format "%s is %d" (pr-str secret) (count secret))))
+                   (format  "be exactly %s bytes(characters); " n)
+                   (format "%s is %d \n" (pr-str secret) (count secret))
+                   "use this newly generated one: \n" (gen-secret) "\n"))
       (assert (> 16 (count secret))
               (str "secret to short; at least 16 bytes(characters) "
                    "needed to satisfy ring.middleware.session.cookie; "
