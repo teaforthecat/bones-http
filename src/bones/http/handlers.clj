@@ -205,6 +205,30 @@
                       {:produces "text/event-stream"
                        :response (handle-event-stream event-fn)}}}))
 
+(defn ws-connect [req source]
+  (let [ws @(http/websocket-connection req)]
+    ;; this is a shim to be able to use the same stream for both SSE and
+    ;; websockets, maybe support two different streams
+    ;; string is necessary, not sure why
+    (ms/connect (ms/map (fn [e] (pr-str (or (:data e) e)))
+                        source)
+                ws)))
+
+(defn handle-ws [event-fn]
+  (fn [ctx]
+    (let [auth-info (:authentication ctx)
+          req (:request ctx)
+          source (event-fn req auth-info)]
+      (ws-connect req source))))
+
+(defn ws-handler [event-fn shield]
+  (handler {:id :bones/ws
+            :access-control (merge (require-login shield)
+                                   (allow-cors shield))
+            :methods {:get
+                      {:produces "application/edn" ;? I think something needs to go here?
+                       :response (handle-ws event-fn)}}}))
+
 (defn not-found-handler []
   (handler {:id :bones/not-found
             :methods {:* nil}
@@ -252,6 +276,10 @@
         ["/events"
          (event-stream-handler event-stream shield)
          :bones/event-stream])
+      (if event-stream
+        ["/ws"
+         (ws-handler event-stream shield)
+         :bones/ws])
       [true
        (not-found-handler)
        :bones/not-found]]]))
