@@ -104,6 +104,7 @@
           claims (merge data exp)]
       (jwe/encrypt claims secret algorithm)))
   component/Lifecycle
+  (stop [cmp] cmp)
   (start [cmp]
     (let [config (get-in cmp [:conf :http/auth])
           {:keys [secret

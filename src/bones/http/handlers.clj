@@ -289,7 +289,9 @@
   (start [cmp]
     (let [handlers (get-in cmp [:conf :http/handlers])
           auth-shield (:shield cmp)]
-      (assoc cmp :routes (routes handlers auth-shield)))))
+      (assoc cmp :routes (routes handlers auth-shield))))
+  (stop [cmp]
+    (assoc cmp :routes nil)))
 
 (defn app [handlers shield]
   (make-handler (routes handlers shield)))

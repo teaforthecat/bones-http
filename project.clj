@@ -1,4 +1,4 @@
-(defproject bones/http "0.2.1"
+(defproject bones/http "0.2.2"
   :description "A CQRS implementation built on Pedestal"
   :url "https://github.com/teaforthecat/bones-http"
   :license {:name "Eclipse Public License"
