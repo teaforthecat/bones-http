@@ -160,7 +160,14 @@ as:
        source
        #({:event "test" :id % :data (* 2 %)}))))
 ```
+_note: if using bones.client, event types are not supported_
 
+## WebSocket
+
+Another way to consume an event-stream is via a WebSocket. You can use the same
+function so serve both SSE and WebSocket connections. The WebSocket connection
+will only serve the `:data` attribute. The `:event` and `:id` will be dropped
+because those features aren't in the protocol. 
 
 ## Configuration
 

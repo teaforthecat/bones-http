@@ -19,14 +19,14 @@
     output-stream))
 
 ;; command handler / your project domain function
-(defn add-account [args auth-info req]
+(defn add-race [args auth-info req]
   [args auth-info])
 
 ;; all the commands with names
 (def commands
-  [[:add-account {:account/xact-id s/Int
-                  :account/evo-id (s/maybe s/Int)}
-    add-account]])
+  [[:add-race {:red-truck s/Int
+               :blue-truck (s/maybe s/Int)}
+    add-race]])
 
 ;; login handler
 (defn login [args req]
