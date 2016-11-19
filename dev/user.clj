@@ -2,7 +2,7 @@
   (require [clojure.core.async :as a]
            [schema.core :as s]
            [manifold.stream :as ms]
-           [bones.http.core :as http])
+           [bones.http :as http])
   (:require [buddy.auth.protocols :as proto]))
 
 ;; the global reload-able system
@@ -22,7 +22,7 @@
 (defn add-race [args auth-info req]
   [args auth-info])
 
-;; all the commands with names
+;; all the commands with names and schemas
 (def commands
   [[:add-race {:red-truck s/Int
                :blue-truck (s/maybe s/Int)}
@@ -55,13 +55,36 @@
   (start)
   (stop)
 
-  ;; create token (login)
-  (.token (:shield @sys) {:abc "123"})
+  ; After starting the webserver by evaluating `(start)', these commands can be pasted into a terminal to see the output
 
-  ;; check it
-  (proto/-authenticate (get-in @sys [:shield :token-backend]) {} "eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA") ;;=> {:abc "123"}
 
-  ;; curl localhost:8080/api/events -H "Authorization: Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA"
+  ;;### login request
+  ;;    $ curl localhost:8080/api/login -v -H "Content-Type: application/edn" -d '{:username "hi" :anything true}'
+  ;; returns token
 
-  ;; curl localhost:8080/api/events --cookie "bones-session=eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA" -v
+
+  ;;#### POST Command
+  ;;    $ curl localhost:8080/api/command -v -X POST -H "Content-Type: application/edn" -d '{:command :add-race :args {:red-truck 123 :blue-truck 456}}' -H "Authorization: Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA"
+  ;; returns args and auth-info
+
+
+  ;;### GET Query
+  ;;    $ curl localhost:8080/api/query?q=anything -v -X GET -H "Content-Type: application/edn" -H "Authorization: Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA"
+  ;; returns args and auth-info
+
+
+  ;;### SSE with token
+  ;;    $ curl localhost:8080/api/events -H "Authorization: Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA"
+  ;; 10 numbers streaming
+
+
+  ;;### SSE with cookie
+  ;;    $ curl localhost:8080/api/events --cookie "bones-session=eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA" -v
+  ;; 10 numbers streaming
+
+
+  ;;### WebSocket
+  ;;    $ curl localhost:8080/api/ws -v -N -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Host: localhost:8080" -H "Origin: localhost:8080" -H "Authorization: Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA"
+  ;; not pretty, but you see 10 numbers
+
   )

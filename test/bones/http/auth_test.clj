@@ -14,7 +14,7 @@
 
 (def shield (.start (auth/map->Shield {:conf conf})))
 
-;; made from `valid-scret'
+;; made from `valid-secret' above
 (def valid-token "eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-C0-WezDMykhd8LnhOuY6IyB5z6LnPdu.hqNtqBvALHaZljhf.OO9TxVojKVRqku1OQw.DZ8uaDZD6ZSMvDcCDXEkIw")
 
 (deftest token
@@ -59,7 +59,7 @@
     (let [secret "a 16 byte string"
           alg :a128kw]
       (is (nil? (auth/validate-secret secret alg)))))
-  (testing "takes 16 bytes from secret for cookie-secret"
+  (testing "gen-secret creates a valid secret"
     (let [secret (auth/gen-secret)]
       (is (= true (valid-secret-key? (.getBytes (auth/limited-secret secret 16))))))))
 

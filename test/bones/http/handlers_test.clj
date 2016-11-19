@@ -267,4 +267,24 @@
           response (OPTIONS app "/api/login")]
       (has response
            :status 200
-           :headers {"allow" "POST, OPTIONS", "content-length" "0", "access-control-allow-origin" "http://localhost:3449", "access-control-allow-credentials" "true", "access-control-allow-methods" "GET, POST", "access-control-allow-headers" "Content-Type, Authorization", "x-frame-options" "SAMEORIGIN", "x-xss-protection" "1; mode=block", "x-content-type-options" "nosniff"}))))
+           :headers (secure-and {"allow" "POST, OPTIONS",
+                                 "content-length" "0",
+                                 "access-control-allow-origin" "http://localhost:3449",
+                                 "access-control-allow-credentials" "true",
+                                 "access-control-allow-methods" "GET, POST",
+                                 "access-control-allow-headers" "Content-Type, Authorization"})))))
+
+;; testing the request doesn't work because the (:request ctx) is a map, but
+;; aleph expects NettyRequest which it provides when routes are run by the aleph
+;; server, not sure how to proceed here yet
+;; (deftest websocket
+;;   (testing "get number stream"
+;;     (let [app (new-app)
+;;           response (api-get app "/api/ws" {"Connection" "Upgrade"
+;;                                            "Upgrade" "websocket"})]
+;;       (has response
+;;            :status 200
+;;            :body "0\n\n1\n\n"
+;;            :headers (secure-and {"Connection" "Upgrade"
+;;                                  "Upgrade" "websocket"
+;;                                  "Sec-Websocket-Accept" "wat"})))))
