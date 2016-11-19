@@ -112,12 +112,13 @@ if mount_point is the default of "/api"
 - GET /api/events
 - GET /api/login
 - ANY /api/logout
+- WebSocket /api/ws
 
 ## Query
 
 Let's say we have a function that gets data from a database. We'll connect this
 function to the web by creating a query handler. This is a function that takes
-three arguments, similarly to the command handler. The first parameter will be
+three arguments, similar to the command handler. The first parameter will be
 the parsed query string from the web request, conformed to a schema. The second
 is the auth-info, and the third is the whole request.
 
@@ -160,7 +161,7 @@ as:
        source
        #({:event "test" :id % :data (* 2 %)}))))
 ```
-_note: if using bones.client, event types are not supported_
+_note: if using [bones.client](https://github.com/teaforthecat/bones-client), event types are not supported_
 
 ## WebSocket
 
@@ -180,7 +181,7 @@ configuration for the bones system in this atom as well.
 ```
 
 ```clojure
-(require '[bones.http.core :as http])
+(require '[bones.http :as http])
 (def commands [[:new-widget widget-schema 'new-widget]])
 (def query [{:q s/Any} query-handler])
 (def event-stream event-stream-handler)
