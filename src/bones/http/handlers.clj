@@ -114,7 +114,8 @@
                              (allow-cors shield))
             :methods {:get
                       {:response (fn [{:keys [parameters authentication request]}]
-                                   (query-fn parameters authentication request))
+                                   (let [query (:query parameters)]
+                                     (query-fn query authentication request)))
                        :consumes "application/edn"
                        :produces "application/edn"}}
             :responses (bad-request-response :query)}))
@@ -148,9 +149,11 @@
                         :response handle-error}}
        :methods {:post
                  {:response (fn [{:keys [parameters request] :as ctx}]
-                              (if-let [result (login-fn parameters request)]
-                                result
-                                (assoc (:response ctx) :status 401 :body "invalid credentials")))
+                              (let [body (:body parameters)]
+                                (if-let [result (login-fn body request)]
+                                  result
+                                  (assoc (:response ctx) :status 401 :body "invalid credentials"))))
+                  :parameters {:body login-schema}
                   :consumes "application/edn"
                   :produces "application/edn"}}}
       (yada/resource)

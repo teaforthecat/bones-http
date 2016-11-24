@@ -36,7 +36,10 @@
 (def query-schema {:name s/Str})
 
 (defn login-handler [args req]
-  [args "Welcome"])
+  (if (= "abc" (:username args))
+    [args "Welcome"]
+    nil ;; 401
+    ))
 
 (defn logout-handler [req]
   "goodbye")
@@ -162,8 +165,8 @@
           response (api-get app "/api/query" {:name "abc"})]
       (has response
            :status 200
-           :headers (secure-and {"content-length" "536", "content-type" "application/edn"})
-           :body "[\"ok\" {:query {:name \"abc\"}} {\"default\" {:data \"Welcome\"}} {:remote-addr \"localhost\", :params nil, :route-params nil, :headers {\"host\" \"localhost\", \"authorization\" \"Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-KBhDMBnLd1tRL4u_fxC5nKTWB1TA7mt.vZ36HSF4yNVRxjP5.37-PnQnhKF3QMclC0jYObzcV.BwliiVaQu5n5Ylkvrs51lg\", \"content-type\" \"application/edn\"}, :server-port 80, :content-type \"application/edn\", :uri \"/api/query\", :server-name \"localhost\", :query-string \"name=abc\", :body nil, :scheme :http, :request-method :get}]\n")))
+           :headers (secure-and {"content-length" "527", "content-type" "application/edn"})
+           :body "[\"ok\" {:name \"abc\"} {\"default\" {:data \"Welcome\"}} {:remote-addr \"localhost\", :params nil, :route-params nil, :headers {\"host\" \"localhost\", \"authorization\" \"Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-KBhDMBnLd1tRL4u_fxC5nKTWB1TA7mt.vZ36HSF4yNVRxjP5.37-PnQnhKF3QMclC0jYObzcV.BwliiVaQu5n5Ylkvrs51lg\", \"content-type\" \"application/edn\"}, :server-port 80, :content-type \"application/edn\", :uri \"/api/query\", :server-name \"localhost\", :query-string \"name=abc\", :body nil, :scheme :http, :request-method :get}]\n")))
   (testing "missing required param"
     (let [app (new-app)
           response (api-get app "/api/query" {:q 123})]
