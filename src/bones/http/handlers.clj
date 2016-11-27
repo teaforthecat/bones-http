@@ -120,21 +120,18 @@
                        :produces "application/edn"}}
             :responses (bad-request-response :query)}))
 
-(defn encrypt-response [shield ctx]
-  (if (or (= :options (:method ctx));;cors pre-flight
-          (= 401 (get-in ctx [:response :status]))) ;; invalid credentials
-    ctx
-    (let [cookie-name (:cookie-name shield)
-          data (get-in ctx [:response :body])
-          ;; to share some data, but not all (e.g.: roles or groups for permissions)
-          share-keys (:share (meta data))
-          share-data (if share-keys (select-keys data share-keys))
-          ;; todo: enforce login-fn to return a map
-          token (.token shield (if (map? data) data {:data data}))]
-      (-> ctx
-          (assoc-in [:response :cookies] {cookie-name token})
-          (assoc-in [:response :body] {"token" token
-                                       "share" share-data})))))
+(defn encrypt-response [shield ctx result]
+  (let [cookie-name (:cookie-name shield)
+        data result
+        ;; to share some data, but not all (e.g.: roles or groups for permissions)
+        share-keys (:share (meta data))
+        share-data (if share-keys (select-keys data share-keys))
+        ;; todo: enforce login-fn to return a map
+        token (.token shield (if (map? data) data {:data data}))]
+    (-> ctx
+        (assoc-in [:response :cookies] {cookie-name token})
+        (assoc-in [:response :body] {"token" token
+                                     "share" share-data}))))
 
 (defn unset-cookie [shield ctx]
   (let [cookie-name (:cookie-name shield)]
@@ -146,25 +143,20 @@
   (pr-str (:error ctx)))
 
 (defn login-handler [login-schema login-fn shield]
-  (-> {:id :bones/login
-       :access-control (allow-cors shield)
-       :responses {500 {:produces "text/plain"
-                        ;; todo: don't do this in production
-                        :response handle-error}}
-       :methods {:post
-                 {:response (fn [{:keys [parameters request] :as ctx}]
-                              (let [body (:body parameters)]
-                                (if-let [result (login-fn body request)]
-                                  result
-                                  (assoc (:response ctx) :status 401 :body "invalid credentials"))))
-                  :parameters {:body login-schema}
-                  :consumes "application/edn"
-                  :produces "application/edn"}}}
-      (yada/resource)
-      (yada.resource/insert-interceptor
-       yada.interceptors/create-response
-       (partial encrypt-response shield))
-      (yada/handler)))
+  (handler {:id :bones/login
+            :access-control (allow-cors shield)
+            :responses {500 {:produces "text/plain"
+                             ;; todo: don't do this in production
+                             :response handle-error}}
+            :methods {:post
+                      {:response (fn [{:keys [parameters request] :as ctx}]
+                                   (let [body (:body parameters)]
+                                     (if-let [result (login-fn body request)]
+                                       (:response (encrypt-response shield ctx result))
+                                       (assoc (:response ctx) :status 401 :body "invalid credentials"))))
+                       :parameters {:body login-schema}
+                       :consumes "application/edn"
+                       :produces "application/edn"}}}))
 
 (defn logout-handler [logout-fn shield]
   (-> {:id :bones/login
