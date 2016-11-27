@@ -15,7 +15,7 @@ Lets say we have a function that writes data to a database, and we want to
 connect it to the web.
 
 We can do this by creating a bones command handler. This is a function that
-takes three arguments. The first is a schema-defined map. The second is also a
+takes three arguments. The first is a schema-defined map, the second is also a
 map, and contains identification information gathered from the request.
 
 Here is a contrived example:
@@ -100,22 +100,12 @@ To make authenticated API requests use a header called "Authorization" with a
 value of the encoded data prefixed with "Token " like this: `"Authorization:
  Token WYdJ21cgv2g-2BlNkgdyYv.."`
 
-The response of the "login" function above could be altered to add "share" data
-to the response, along with the token. This is useful for sharing groups or
-roles the user is in. The share data is sent via meta data: 
-
-```clojure
-(defn login [args request]
-  (let [auth-info (find-user (:email args) (:password args))]
-     ;; assuming find-user returns a map with key :role
-     ^{:share [:role]}} auth-info))
-```
 
 _The "Authorization" header has a precedent in basic authentication, and Buddy
  uses the "Token " prefix in the JWE backend._
 
 ## Resources
-If mount_point is the default ("/api")
+if mount_point is the default of "/api"
 
 - POST /api/command
 - GET /api/query

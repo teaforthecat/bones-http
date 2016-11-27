@@ -192,7 +192,7 @@
            :status 404))))
 
 (deftest login
-  (testing "set-cookie and token"
+  (testing "set-cookie"
     (let [app (new-app)
           response (POST app "/api/login" {:username "abc" :password "123"} {})]
       (is (= 200 (:status response)))
@@ -204,13 +204,7 @@
           response (api-post app "/api/login" {:username "abc" :password "123"})]
       (has response
            :body "invalid credentials"
-           :status 401)))
-  (testing "shares data from the token data via meta data"
-    (let [response-data ^{:share [:roles]} {:userid "not-shared" :roles [:janitor]}
-          app (new-app :login [login-schema (fn [_ _]  response-data)])
-          response (api-post app "/api/login" {:username "abc" :password "123"})
-          body (read-string (:body response))]
-      (is (= (body "share") {:roles [:janitor]})))))
+           :status 401))))
 
 ;; from yada.cookies
 (defn cookie-now []

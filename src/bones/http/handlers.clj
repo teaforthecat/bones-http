@@ -126,15 +126,11 @@
     ctx
     (let [cookie-name (:cookie-name shield)
           data (get-in ctx [:response :body])
-          ;; to share some data, but not all (e.g.: roles or groups for permissions)
-          share-keys (:share (meta data))
-          share-data (if share-keys (select-keys data share-keys))
           ;; todo: enforce login-fn to return a map
           token (.token shield (if (map? data) data {:data data}))]
       (-> ctx
           (assoc-in [:response :cookies] {cookie-name token})
-          (assoc-in [:response :body] {"token" token
-                                       "share" share-data})))))
+          (assoc-in [:response :body] {"token" token})))))
 
 (defn unset-cookie [shield ctx]
   (let [cookie-name (:cookie-name shield)]
