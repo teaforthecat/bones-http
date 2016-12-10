@@ -44,6 +44,17 @@ formatted commands.
 (def commands [[:new-widget widget-schema 'new-widget]])
 ```
 
+Then we'll start a web server using that variable, but this isn't a complete
+system yet. 
+
+```clojure
+(require '[bones.http :as http])
+
+(def sys (atom {}))
+(http/build-system sys {:http/handlers {:commands commands})
+(http/start sys)
+```
+
 When bones receives a command it will execute the function of the command
 matching the name given, and pass the args of the request as the first
 parameter. The response body will consist of the return value of this function.
@@ -52,9 +63,35 @@ _note: only edn is accepted currently_
 
 _note: "/api" is the default mount point and can be configured ..._
 
+Almost ready, test this out and see that this will result in a 401 response:
+
 ```sh
-curl localhost:8080/api/command -X POST -d '{:command :new-widget :args {:width 3 :height 5}' \
-  -H "Content-Type: application/edn" plus authentication...
+curl localhost:3000/api/command  \
+  -X POST \
+  -d '{:command :new-widget :args {:width 3 :height 5}' \
+  -H "Content-Type: application/edn"
+```
+
+For testing, here is a made up secret and a token
+derived from that secret, which will authenticate.
+
+_note: you'll want to generate your own secret; see below_
+
+```clojure
+(require '[bones.http :as http])
+
+(http/stop sys) ;; if started
+(http/build-system sys {:http/handlers {:commands commands}
+                        :http/auth {:secret "CypOW2ZYqvB42ahTI9GdXZ5v4sphlwdC"})
+(http/start sys)
+```
+
+```sh
+curl localhost:3000/api/command  \
+  -X POST \
+  -d '{:command :new-widget :args {:width 3 :height 5}' \
+  -H "Content-Type: application/edn" \
+  -H "Authorization: Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.HVUpeQY0SgjN5KGXXU7zQnkZhacEFm1d.WZq2kqGbQmJ5HvzA.ZbkbjUimjPH-KCCPRQ.qoJeedBfruV59vOqUdpnGA"
 ```
 
 ## Authentication
@@ -112,7 +149,7 @@ roles the user is in. The share data is sent via meta data:
 ```
 
 _The "Authorization" header has a precedent in basic authentication, and Buddy
- uses the "Token " prefix in the JWE backend._
+uses the "Token " prefix in the JWE/[JWT](https://jwt.io/) backend._
 
 ## Resources
 If mount_point is the default ("/api")
@@ -150,9 +187,13 @@ is only one query handler.
 
 ## SSE Event Stream
 
-There can be only one event-stream handler. It does not have a schema attached
-to it like the other handlers, and it must return a stream, or anything that
-Manifold can turn into a source.
+There is a protocol that all the browsers have implemented to maintain a
+persistent connection to the web server. We can use this to push data in real
+time to the browser. It is really simple to set up - if you have some experience
+with streaming data or Clojure's lazy sequences. Here are some things you need
+to know about a bones event-handler: There can be only one event-stream handler.
+It does not have a schema attached to it like the other handlers, and it must
+return a stream, or anything that Manifold can turn into a source.
 
 ```clojure
 (defn event-stream-handler [request auth-info]
@@ -176,7 +217,7 @@ _note: if using [bones.client](https://github.com/teaforthecat/bones-client), ev
 ## WebSocket
 
 Another way to consume an event-stream is via a WebSocket. You can use the same
-function so serve both SSE and WebSocket connections. The WebSocket connection
+function to serve both SSE and WebSocket connections. The WebSocket connection
 will only serve the `:data` attribute. The `:event` and `:id` will be dropped
 because those features aren't in the protocol. 
 
@@ -184,14 +225,12 @@ because those features aren't in the protocol.
 
 Normally we put our connections into a single global atom so we can control the
 life cycle of the connections easily. Here, we're going to put all our
-configuration for the bones system in this atom as well.
-
-```clojure
-(def sys (atom {}))
-```
+configuration for the bones system in this atom as well. Well bring it all
+together like this:
 
 ```clojure
 (require '[bones.http :as http])
+(def sys (atom {}))
 (def commands [[:new-widget widget-schema 'new-widget]])
 (def query [{:q s/Any} query-handler])
 (def event-stream event-stream-handler)
