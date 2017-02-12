@@ -1,5 +1,5 @@
 (ns bones.http.auth
-  (:require [buddy.sign.jwe :as jwe]
+  (:require [buddy.sign.jwt :as jwt]
             [buddy.core.nonce :as nonce]
             [buddy.auth :refer [authenticated? throw-unauthorized]]
             [buddy.auth.backends.token :refer [jwe-backend]]
@@ -8,8 +8,9 @@
             [buddy.hashers :as hashers]
             [buddy.auth.protocols :as proto]
             [yada.security :as yada]
+            [yada.cookies :as cookies]
             [clj-time.core :as time]
-            [schema.core :as s]
+            [byte-streams :as bs]
             [ring.middleware.session.cookie :refer [cookie-store]]
             [ring.middleware.session :refer [wrap-session session-request session-response]]
             [ring.middleware.session.store :as store]
@@ -24,16 +25,10 @@
 (def check-authenticated
   {:name :bones.auth/check-authenticated
    :enter (fn [ctx]
-            ;; maybe check for identity directly here, to make it obvious
+            ;; authenticated just checks for the presence of :identity
             (if (authenticated? (:request ctx))
               ctx
               (throw (ex-info "Not Authenticated" {:status 401}))))})
-
-(defn identity-interceptor [shield]
-  ;; identity above refers to buddy's idea of authentication identity
-  ;; identity below is clojure.core; to hack the ring middleware for pedestal
-  (let [{:keys [token-backend]} shield]
-    (wrap-authentication identity token-backend)))
 
 ;; thanks! apiga http://stackoverflow.com/a/37356673/714357
 (defn gen-secret
@@ -74,7 +69,7 @@
 (defmethod yada/verify :bones/cookie
   [ctx {:keys [:bones/shield] :as scheme}]
   (let [{:keys [token-backend cookie-name]} shield
-        token (get-in ctx [:cookies cookie-name])
+        token (-> ctx :request cookies/parse-cookies (get cookie-name))
         request (:request ctx)]
     ;; get the same token that is in the Authorization header from the cookie
     (if (not-empty token)
@@ -93,7 +88,6 @@
 (defrecord Shield [conf]
   Token
   (token [cmp data]
-    (s/validate {s/Any s/Any} data)
     (let [exp? (:token-exp-ever cmp)
           hours (:token-exp-hours cmp)
           secret (:secret cmp)
@@ -102,11 +96,11 @@
                 {:exp (time/plus (time/now) (time/hours hours))}
                 {})
           claims (merge data exp)]
-      (jwe/encrypt claims secret algorithm)))
+      (jwt/encrypt claims secret algorithm)))
   component/Lifecycle
   (stop [cmp] cmp)
   (start [cmp]
-    (let [config (get-in cmp [:conf :http/auth])
+    (let [config (get-in cmp [:conf :bones.http/auth])
           {:keys [secret
                   algorithm
                   cookie-name

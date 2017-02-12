@@ -1,21 +1,17 @@
 (ns bones.http.handlers
   (:require [bones.http.commands :as commands]
-            [bones.http.auth :refer [identity-interceptor]]
             [ring.middleware.params :as params]
-            [compojure.route :as croute]
-            [compojure.response :refer [Renderable]]
-            [aleph.http :as http]
+            [clojure.walk :refer [keywordize-keys]]
+            [aleph.http :as ahttp]
             [manifold.stream :as ms]
             [manifold.deferred :as d]
-            [aleph.http :refer [websocket-connection]]
-            [clojure.core.async :as a]
-            [compojure.api.sweet :as api]
+            ;; [clojure.core.async :as a]
             [yada.yada :as yada]
             [bidi.ring :refer [make-handler]]
             [clj-time.core :as t]
             [clj-time.coerce :refer (to-date)]
-            [schema.core :as s]
-            [schema.experimental.abstract-map :as abstract-map]
+            [schema.core :as schema]
+            [clojure.spec :as s]
             [clojure.edn :as edn]
             [byte-streams :as bs]
             [com.stuartsierra.component :as component]))
@@ -72,27 +68,29 @@
      (ex-info "authorization required"
               {:status 401}))))
 
-(defn handle-command [ctx]
+(defn command-response [ctx]
   (let [{:keys [parameters authentication request]} ctx
         body (:body parameters)
         ;; yada won't parse body if if the Content-Length header is not provided
         ;; we could require it, but we can also fall back to parsing it ourselves
         body (or body (edn/read-string (bs/to-string (:body (:request ctx)))))]
-    (if-let [errors (s/check commands/Command body)]
+    (if-let [errors (commands/check body)]
       (assoc (:response ctx) :status 400 :body errors)
       (commands/command body authentication request))))
 
-(defn command-handler [commands shield]
-  ;; hack to ensure registration - abstract-map is experimental
-  ;; if the print is removed, for some reason(!), the commands don't get registered
-  (pr-str (commands/register-commands commands))
+(defn command-handler
+  "does two things, register commands and return yada handler"
+  [commands shield]
+  (commands/register-commands commands)
   (handler {:id :bones/command
             :access-control (merge
                              (require-login shield)
                              (allow-cors shield))
             :methods {:post
-                      {:response handle-command
-                       :parameters {:body {:command s/Keyword :args s/Any}}
+                      {:response command-response
+                       ;; just to get the coersion, duplicated in commands
+                       :parameters {:body {:command schema/Keyword
+                                           :args {schema/Any schema/Any}}}
                        :consumes "application/edn"
                        :produces "application/edn"}}
             :responses (bad-request-response :body)}) )
@@ -103,19 +101,24 @@
             :methods {:get
                       ;; only show the command name and args schema
                       ;; todo: expand on this or replace with swagger
+                      ;; maybe use a `recursive-describe' function
                       {:response (map #(take 2 %) commands)
                        :produces "application/edn"}}}))
 
-(defn query-handler [query-schema query-fn shield]
+(defn query-response [query-fn query-spec]
+  (fn [{:keys [parameters authentication request] :as ctx}]
+    (let [query ((fnil keywordize-keys {}) (:query parameters))]
+      (if (s/valid? query-spec query)
+        (query-fn (s/conform query-spec query) authentication request)
+        (assoc (:response ctx) :status 400 :body (s/explain-data query-spec query))))))
+
+(defn query-handler [query-spec query-fn shield]
   (handler {:id :bones/query
-            :parameters {:query query-schema}
             :access-control (merge
                              (require-login shield)
                              (allow-cors shield))
             :methods {:get
-                      {:response (fn [{:keys [parameters authentication request]}]
-                                   (let [query (:query parameters)]
-                                     (query-fn query authentication request)))
+                      {:response (query-response query-fn query-spec)
                        :consumes "application/edn"
                        :produces "application/edn"}}
             :responses (bad-request-response :query)}))
@@ -133,7 +136,7 @@
         (assoc-in [:response :body] {"token" token
                                      "share" share-data}))))
 
-(defn unset-cookie [shield ctx]
+(defn unset-cookie [ctx shield]
   (let [cookie-name (:cookie-name shield)]
     (assoc-in ctx [:response :cookies] {cookie-name {:value "nil"
                                                      :expires (to-date (t/now))}})))
@@ -142,40 +145,47 @@
   ;; bare minimum to show it
   (pr-str (:error ctx)))
 
-(defn login-handler [login-schema login-fn shield]
+(defn login-response [login-fn login-spec shield]
+  (fn [{:keys [parameters request] :as ctx}]
+    (let [body (:body parameters)]
+      (if-let [result (login-fn body request)]
+        (:response (encrypt-response shield ctx result))
+        (assoc (:response ctx) :status 401 :body "invalid credentials")))))
+
+(defn login-handler [login-spec login-fn shield]
   (handler {:id :bones/login
             :access-control (allow-cors shield)
             :responses {500 {:produces "text/plain"
-                             ;; todo: don't do this in production
+                             ;; TODO: don't do this in production
                              :response handle-error}}
             :methods {:post
-                      {:response (fn [{:keys [parameters request] :as ctx}]
-                                   (let [body (:body parameters)]
-                                     (if-let [result (login-fn body request)]
-                                       (:response (encrypt-response shield ctx result))
-                                       (assoc (:response ctx) :status 401 :body "invalid credentials"))))
-                       :parameters {:body login-schema}
+                      {:response (login-response login-fn login-spec shield)
+                       :parameters {:body {schema/Any schema/Any}}
                        :consumes "application/edn"
                        :produces "application/edn"}}}))
 
+(defn logout-response [logout-fn shield]
+  (fn [ctx]
+    (let [body (logout-fn (:request ctx))]
+      (-> ctx
+          (assoc-in [:response :body] body)
+          (unset-cookie shield)
+          :response))))
+
 (defn logout-handler [logout-fn shield]
-  (-> {:id :bones/login
-       :access-control (allow-cors shield)
-       :responses {500 {:produces "text/plain"
-                        ;; todo: don't do this in production
-                        :response handle-error}}
-       ;; strange :* results in a 406
-       :methods (reduce #(assoc %1 %2
-                                {:response (fn [ctx] (logout-fn (:request ctx)))
-                                 :consumes "application/edn"
-                                 :produces "application/edn"})
-                        {}
-                        [:get :post :put :delete])}
-      (yada/resource)
-      (yada.resource/insert-interceptor
-       yada.interceptors/create-response
-       (partial unset-cookie shield))
-      (yada/handler)))
+  (handler
+   {:id :bones/logout
+    :access-control (allow-cors shield)
+    :responses {500 {:produces "text/plain"
+                     ;; TODO: don't do this in production
+                     :response handle-error}}
+    ;; strange :* results in a 406
+    :methods (reduce #(assoc %1 %2
+                                 {:response (logout-response logout-fn shield)
+                                  :consumes "application/edn"
+                                  :produces "application/edn"})
+                         {}
+                         [:get :post :put :delete])}))
 
 (defn format-event [{:keys [event data id] :as datum :or {data datum}}]
   ;; allows map of sse keys or just anything as data to be str'd
@@ -205,7 +215,7 @@
                        :response (handle-event-stream event-fn)}}}))
 
 (defn ws-connect [req source]
-  (let [ws @(http/websocket-connection req)]
+  (let [ws @(ahttp/websocket-connection req)]
     ;; this is a shim to be able to use the same stream for both SSE and
     ;; websockets, maybe support two different streams
     ;; string is necessary, not sure why
@@ -240,15 +250,15 @@
 
 (defn routes [req-handlers shield]
   ;; if query is nil/not given, 404 will be the response to ./query
-  ;; todo what is schema for callable
-  (let [{:keys [:login
-                :logout
-                :commands
-                :query
-                :event-stream
-                :mount-path]
-         :or {:mount-path "/api"
-              :logout (fn [req] "")}} req-handlers]
+  ;; todo what is spec for callable
+  (let [{:keys [login
+                logout
+                commands
+                query
+                event-stream
+                mount-path]
+         :or {mount-path "/api"
+              logout (fn [req] "")}} req-handlers]
     [mount-path
      [
       (if commands
@@ -286,7 +296,7 @@
 (defrecord App [conf shield]
   component/Lifecycle
   (start [cmp]
-    (let [handlers (get-in cmp [:conf :http/handlers])
+    (let [handlers (get-in cmp [:conf :bones.http/handlers])
           auth-shield (:shield cmp)]
       (assoc cmp :routes (routes handlers auth-shield))))
   (stop [cmp]

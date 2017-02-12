@@ -9,13 +9,14 @@
 
 (def valid-secret (apply str (map char (range 32))))
 
-(def conf {:http/auth {:secret valid-secret
+(def conf {:bones.http/auth {:secret valid-secret
                        :cookie-name "pizza"}})
 
 (def shield (.start (auth/map->Shield {:conf conf})))
 
 ;; made from `valid-secret' above
-(def valid-token "eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-C0-WezDMykhd8LnhOuY6IyB5z6LnPdu.hqNtqBvALHaZljhf.OO9TxVojKVRqku1OQw.DZ8uaDZD6ZSMvDcCDXEkIw")
+;; (.token shield {:abc "123"})
+(def valid-token "eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1QiLCJlbmMiOiJBMTI4R0NNIn0.x6MngqAvPPrBnlr7jERY92QR30XGaXz0.2g-lzuaNPRaUqay7.Ll_Rsl6pOp6SKqEmgQ.EG0A18FZsqkbnAq3KCu8-g")
 
 (deftest token
   (testing "valid token in header"
@@ -26,7 +27,7 @@
                                :scheme :bones/token})))))
   (testing "valid token in Cookie"
     (let [token (.token shield {:abc "123"})
-          ctx {:request {} :cookies {"pizza" token}}]
+          ctx {:request {:headers {"cookie" (str "pizza=" token)}}}]
       (is (= {:abc "123"}
              (yada/verify ctx {:bones/shield shield
                                :scheme :bones/cookie})))))

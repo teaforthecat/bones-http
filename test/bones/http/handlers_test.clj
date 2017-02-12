@@ -5,20 +5,18 @@
             [clojure.edn :as edn]
             [bones.http.service :as service]
             [peridot.core :as p]
-            [clojure.core.async :as a]
             [manifold.stream :as ms]
             [clj-time.core :as t]
             [clj-time.format :as tf]
-            [aleph.http :as http]
             [byte-streams :as bs]
             [ring.mock.request :refer (request) :rename {request mock-request}]
             [bones.http.handlers :as handlers]
-            [schema.core :as s]))
+            [clojure.spec :as s]))
 
 ;; start example implementation
 
-(def conf {:http/auth {:secret  (apply str (map char (range 32)))
-                       :cookie-name "pizza"}})
+(def conf {:bones.http/auth {:secret  (apply str (map char (range 32)))
+                             :cookie-name "pizza"}})
 
 (defn event-stream-handler [req auth-info]
   (let [output-stream (ms/stream)
@@ -33,7 +31,9 @@
 (defn query-handler [args auth-info req]
   ["ok" args auth-info req])
 
-(def query-schema {:name s/Str})
+(s/def ::name string?)
+
+(def query-schema (s/keys :req-un [::name]))
 
 (defn login-handler [args req]
   (if (= "abc" (:username args))
@@ -44,7 +44,10 @@
 (defn logout-handler [req]
   "goodbye")
 
-(def login-schema {:username s/Str :password s/Str})
+(s/def ::username string?)
+(s/def ::password string?)
+
+(def login-schema (s/keys :req-un [::username ::password]))
 
 (defn who [args auth-info req]
   {:message (str "Hello" (:first-name args))})
@@ -54,9 +57,17 @@
     (throw (ex-info "occupied" {:status 422 :message "room is occupied"}))
     "room granted"))
 
-(def commands [[:who {:first-name s/Str} who]
-               [:what {:weight-kg s/Int} what]
-               [:where {:room-no s/Int}  where]])
+(s/def ::first-name string?)
+(s/def ::what integer?)
+(s/def ::where integer?)
+
+(s/def ::who (s/keys :req-un [::first-name]))
+(s/def ::what (s/keys :req-un [::weight-kg]))
+(s/def ::where (s/keys :req-un [::room-no]))
+
+(def commands [[:who ::who who]
+               [:what ::what what]
+               [:where ::where where]])
 
 (def test-handlers
   {:login [login-schema login-handler]
@@ -76,7 +87,7 @@
 (def valid-token
   ;; this token was encrypted from the login response
   ;; if the secret changes, this wil have to change; TODO: generate this
-  {"Authorization" "Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-KBhDMBnLd1tRL4u_fxC5nKTWB1TA7mt.vZ36HSF4yNVRxjP5.37-PnQnhKF3QMclC0jYObzcV.BwliiVaQu5n5Ylkvrs51lg"})
+  {"Authorization" "Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1QiLCJlbmMiOiJBMTI4R0NNIn0.x6MngqAvPPrBnlr7jERY92QR30XGaXz0.2g-lzuaNPRaUqay7.Ll_Rsl6pOp6SKqEmgQ.EG0A18FZsqkbnAq3KCu8-g"})
 
 ;; end setup
 
@@ -148,7 +159,7 @@
         response (GET app "/api/commands" {} {})]
     (has response
          :status 200
-         :body "((:who {:first-name java.lang.String}) (:what {:weight-kg Int}) (:where {:room-no Int}))\n")))
+         :body "((:who :bones.http.handlers-test/who) (:what :bones.http.handlers-test/what) (:where :bones.http.handlers-test/where))\n")))
 
 (deftest not-found
   (let [app (new-app)
@@ -165,28 +176,30 @@
           response (api-get app "/api/query" {:name "abc"})]
       (has response
            :status 200
-           :headers (secure-and {"content-length" "527", "content-type" "application/edn"})
-           :body "[\"ok\" {:name \"abc\"} {\"default\" {:data \"Welcome\"}} {:remote-addr \"localhost\", :params nil, :route-params nil, :headers {\"host\" \"localhost\", \"authorization\" \"Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1MiLCJlbmMiOiJBMTI4R0NNIn0.-KBhDMBnLd1tRL4u_fxC5nKTWB1TA7mt.vZ36HSF4yNVRxjP5.37-PnQnhKF3QMclC0jYObzcV.BwliiVaQu5n5Ylkvrs51lg\", \"content-type\" \"application/edn\"}, :server-port 80, :content-type \"application/edn\", :uri \"/api/query\", :server-name \"localhost\", :query-string \"name=abc\", :body nil, :scheme :http, :request-method :get}]\n")))
+           :headers (secure-and {"content-length" "516", "content-type" "application/edn"})
+           ;; Note: parameters are `keywordized'
+           :body "[\"ok\" {:name \"abc\"} {\"default\" {:abc \"123\"}} {:remote-addr \"localhost\", :params nil, :route-params nil, :headers {\"host\" \"localhost\", \"authorization\" \"Token eyJhbGciOiJBMjU2S1ciLCJ0eXAiOiJKV1QiLCJlbmMiOiJBMTI4R0NNIn0.x6MngqAvPPrBnlr7jERY92QR30XGaXz0.2g-lzuaNPRaUqay7.Ll_Rsl6pOp6SKqEmgQ.EG0A18FZsqkbnAq3KCu8-g\", \"content-type\" \"application/edn\"}, :server-port 80, :content-type \"application/edn\", :uri \"/api/query\", :server-name \"localhost\", :query-string \"name=abc\", :body nil, :scheme :http, :request-method :get}]\n"
+           )))
   (testing "missing required param"
     (let [app (new-app)
           response (api-get app "/api/query" {:q 123})]
       (has response
            :status 400
-           :headers {"content-length" "49", "content-type" "application/edn"}
-           :body "{:name missing-required-key, \"q\" disallowed-key}\n")))
-  (testing "with any-any schema"
-    (let [app (new-app :query [{} query-handler])
+           :headers (secure-and {"content-length" "100", "content-type" "application/edn"})
+           :body "#:clojure.spec{:problems ({:path [], :pred (contains? % :name), :val {:q \"123\"}, :via [], :in []})}\n")))
+  (testing "with empty query defaults to empty map, which can be valid"
+    (let [app (new-app :query [map? query-handler])
           response (api-get app "/api/query" {})]
       (has response
            :status 200)))
-  (testing "returns an empty string"
-    (let [app (new-app :query [{} (fn [_ _ _] "")])
+  (testing "returns an empty string if given"
+    (let [app (new-app :query [map? (fn [_ _ _] "")])
           response (api-get app "/api/query" {})]
       (has response
            :body ""
            :status 200)))
   (testing "returns 404 when nil"
-    (let [app (new-app :query [{} (fn [_ _ _] nil)])
+    (let [app (new-app :query [map? (fn [_ _ _] nil)])
           response (api-get app "/api/query" {})]
       (has response
            :status 404))))
@@ -226,7 +239,8 @@
                                  "content-type" "application/edn"
                                  ;; luckily this finishes in under a second
                                  "set-cookie" (list (str "pizza=nil; Expires=" (cookie-now)))})
-           :body "goodbye"))))
+           :body "goodbye"
+           ))))
 
 (deftest commands
   (testing "valid command"
@@ -243,8 +257,8 @@
                                              :args {:last-name "Santiago"}})]
       (has response
            :status 400
-           :headers (secure-and {"content-length" "70", "content-type" "application/edn"})
-           :body "{:args {:first-name missing-required-key, :last-name disallowed-key}}\n")))
+           :headers (secure-and {"content-length" "148", "content-type" "application/edn"})
+           :body "#:clojure.spec{:problems ({:path [], :pred (contains? % :first-name), :val {:last-name \"Santiago\"}, :via [:bones.http.handlers-test/who], :in []})}\n")))
   (testing "empty body"
     (are [t v] (= t v)
       "(not (map? \"\"))" (:body (post-command ""))))

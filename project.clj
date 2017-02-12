@@ -1,20 +1,15 @@
 (defproject bones/http "0.2.5"
-  :description "A CQRS implementation built on Pedestal"
+  :description "A spec-driven CQRS implementation built on Yada"
   :url "https://github.com/teaforthecat/bones-http"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.8.0"]
-                 [io.pedestal/pedestal.service "0.5.0"]
-                 [io.pedestal/pedestal.jetty "0.5.0"]
-                 [aleph "0.4.1"]
-                 [metosin/compojure-api "1.1.8"]
-                 [buddy/buddy-auth "0.8.1"]
-                 [buddy/buddy-hashers "0.9.1"]
-                 [prismatic/schema "1.1.2"]
-                 [com.stuartsierra/component "0.3.1"]
-                 [yada "1.1.33"]
-                 [bidi "2.0.10"]
-                 [ring/ring-mock "0.3.0"]
+  :dependencies [[org.clojure/clojure "1.9.0-alpha14"]
+                 [com.stuartsierra/component "0.3.2"]
+                 [buddy/buddy-auth "1.4.1"]
+                 [buddy/buddy-hashers "1.2.0"]
+                 [aleph "0.4.2-alpha12"]
+                 [yada/lean "1.2.1"]
+                 [bidi "2.0.16"]
                  ]
 
   :profiles {:dev {:dependencies [[peridot "0.4.4"]]}}

@@ -3,7 +3,7 @@
 
 bones.http is a CQRS implementation built on
 [yada](https://github.com/juxt/yada). It offers authentication with Buddy and
-validation with Prismatic Schema. It has the goal of a slim API to make getting
+validation with clojure.spec. It has the goal of a slim API to make getting
 started as easy as possible. For a quick implementation example see
 [dev/user.clj](dev/user.clj).
 
@@ -15,7 +15,7 @@ Lets say we have a function that writes data to a database, and we want to
 connect it to the web.
 
 We can do this by creating a bones command handler. This is a function that
-takes three arguments. The first is a schema-defined map. The second is also a
+takes three arguments. The first is a clojure.spec-defined map. The second is also a
 map, and contains identification information gathered from the request.
 
 Here is a contrived example:
@@ -29,19 +29,21 @@ Here is a contrived example:
 ```
 
 We'd like to be confident that the arguments received are what we want and
-expect.  We accomplish this by providing a schema for this command handler.
+expect.  We accomplish this by providing a spec for this command handler.
 
 ```clojure
-(require '[schema.core :as s])
-(defn widget-schema {:width s/Int :height s/Int })
+(require '[clojure.spec :as s])
+(s/def ::width integer?)
+(s/def ::height integer?)
+(s/def ::widget (s/keys :req-un [::width ::height]))
 ```
 
 We'll give it a name, and put it all together into a list of properly
 formatted commands.
 
 ```clojure
-;               name         schema         function
-(def commands [[:new-widget widget-schema 'new-widget]])
+;               name         spec         function
+(def commands [[:new-widget ::widget 'new-widget]])
 ```
 
 Then we'll start a web server using that variable, but this isn't a complete
@@ -166,7 +168,7 @@ If mount_point is the default ("/api")
 Let's say we have a function that gets data from a database. We'll connect this
 function to the web by creating a query handler. This is a function that takes
 three arguments, similar to the command handler. The first parameter will be
-the parsed query string from the web request, conformed to a schema. The second
+the parsed query string from the web request, conformed to a spec. The second
 is the auth-info, and the third is the whole request.
 
 ```clojure
@@ -181,8 +183,10 @@ We'll add this function to the configuration as well (see below), though there
 is only one query handler.
 
 ```clojure
-;            schema     function
-(def query [{:q s/Any} query-handler])
+(s/def ::query-q map?)
+
+;            spec     function
+(def query [::query-q query-handler])
 ```
 
 ## SSE Event Stream
@@ -192,7 +196,7 @@ persistent connection to the web server. We can use this to push data in real
 time to the browser. It is really simple to set up - if you have some experience
 with streaming data or Clojure's lazy sequences. Here are some things you need
 to know about a bones event-handler: There can be only one event-stream handler.
-It does not have a schema attached to it like the other handlers, and it must
+It does not have a spec attached to it like the other handlers, and it must
 return a stream, or anything that Manifold can turn into a source.
 
 ```clojure
@@ -231,8 +235,8 @@ together like this:
 ```clojure
 (require '[bones.http :as http])
 (def sys (atom {}))
-(def commands [[:new-widget widget-schema 'new-widget]])
-(def query [{:q s/Any} query-handler])
+(def commands [[:new-widget ::widget 'new-widget]])
+(def query [::query-q query-handler])
 (def event-stream event-stream-handler)
 (http/build-system sys {:http/handlers {:commands commands
                                         :query query

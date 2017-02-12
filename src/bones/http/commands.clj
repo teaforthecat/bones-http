@@ -1,31 +1,22 @@
 (ns bones.http.commands
-  (:require [schema.core :as s]
-            [schema.experimental.abstract-map :as abstract-map]
+  (:require [clojure.spec :as s]
             [clojure.string :as string]))
 
-(s/defschema Command
-  (abstract-map/abstract-map-schema
-   :command
-   {:args {s/Keyword s/Any}}))
+
+(s/def ::args map?)
+(s/def ::command keyword?)
+(s/def ::body (s/keys :req-un [::command ::args]))
 
 ;; a default is not needed due to the `check-command-exists' interceptor
 ;; get the command on the first argument
 (defmulti command (fn [cmd auth-info req] (:command cmd)))
 
+(def command-map (atom {}))
+
 (defn add-command
-  "ensure a unique command is created based on a name spaced keyword"
-  [command-name schema]
-  (let [varname (-> command-name
-                    str
-                    (string/replace "/" "-")
-                    (string/replace "." "-")
-                    (subs 1)
-                    (str "-schema")
-                    (symbol))]
-    (abstract-map/extend-schema! Command
-                                 {:args schema}
-                                 varname
-                                 [command-name])))
+  "add command by name to the one command-map, used to find the spec on request"
+  [command-name spec]
+  (swap! command-map assoc command-name {:spec spec}))
 
 (defn resolve-command [command-name]
   (cond
@@ -40,6 +31,14 @@
     (fn? command-name)
       command-name))
 
+(defn check [body]
+  (if (s/valid? ::body body)
+    (let [cmd (:command body)
+          command-spec (get-in @command-map [cmd :spec])]
+      (if command-spec
+        (s/explain-data command-spec (:args body))
+        (str cmd " not found in registered commands")))))
+
 (defn register-command
   "the command can have the same name of the function (implicit) - it must also
   have the same namespace as the call of this `register-command' function, or a third
@@ -48,20 +47,21 @@
 
     * resolves a keyword to a function
     * adds a method to `command'
-    * adds a schema to `Command'"
-  ([command-name schema]
-   (register-command command-name schema command-name))
-  ([command-name schema explicit-handler]
+    * adds a spec to `Command'"
+  ([command-name spec]
+   (register-command command-name spec command-name))
+  ([command-name spec explicit-handler]
    (let [command-handler (resolve-command explicit-handler)]
      (if (nil? command-handler)
        (throw (ex-info (str "could not resolve command to a function: "
                             ;; in case the ex-data isn't shown
                             (pr-str explicit-handler))
                        {:command explicit-handler})))
-     (add-command command-name schema)
+     (add-command command-name spec)
      (defmethod command command-name [command auth-info req]
        (command-handler (:args command) auth-info req)))))
 
 
 (defn register-commands [commands]
-  (map (partial apply register-command) commands))
+  (doseq [command-vec commands]
+    (apply register-command command-vec)))
