@@ -1,4 +1,4 @@
-(defproject bones/http "0.2.5"
+(defproject bones/http "0.3.0"
   :description "A spec-driven CQRS implementation built on Yada"
   :url "https://github.com/teaforthecat/bones-http"
   :license {:name "Eclipse Public License"
