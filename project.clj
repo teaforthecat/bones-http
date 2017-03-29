@@ -10,6 +10,7 @@
                  [aleph "0.4.2-alpha12"]
                  [yada/lean "1.2.1"]
                  [bidi "2.0.16"]
+                 [com.taoensso/timbre "4.8.0"]
                  ]
 
   :profiles {:dev {:dependencies [[peridot "0.4.4"]]}}

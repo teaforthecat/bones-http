@@ -6,32 +6,6 @@
             [bones.http.service :as service]
             [clojure.spec :as s]))
 
-#_(defn validate [conf]
-  (let [handlers (:http/handlers conf)
-        {:keys [commands query login]} handlers
-        name-schema (s/one s/Keyword :name)
-        schema-schema (s/one (s/protocol s/Schema) :schema)
-        ;; todo: figure out how to check for an fn; this handler schema is broken
-        handler-schema (s/cond-pre s/Keyword s/Symbol s/Any)]
-    ;; commands: [[name schema handler]]
-    (s/validate [[name-schema
-                  schema-schema
-                  (s/maybe handler-schema)]]
-                commands)
-    ;; query: [schema handler]
-    (s/validate (s/maybe  [schema-schema
-                           handler-schema])
-                query)
-    ;; login: [schema handler]
-    (s/validate (s/maybe [schema-schema
-                          handler-schema])
-                login)
-
-
-    conf))
-
-
-;; not sure about this:
 (s/def ::command-vec (s/cat :name keyword?  :spec keyword? :handler symbol?))
 ;; the inner spec here resets reg-op context which provides the dive into the nested vector
 (s/def ::commands (s/* (s/spec ::command-vec)))
@@ -45,7 +19,9 @@
 
 (s/def ::conf (s/keys :opt-un [::handlers]))
 
-(defn throw-spec [spec value]
+(defn throw-spec
+  "a slightly improved report of the problem"
+  [spec value]
   (let [errors (s/explain-data spec value)]
     (throw (ex-info (str spec "\n value: \n" value "\n does not conform to: \n" spec)
                     {

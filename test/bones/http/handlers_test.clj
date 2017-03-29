@@ -1,7 +1,7 @@
 (ns bones.http.handlers-test
   (:require [bones.http.handlers :as handlers]
             [bones.http.auth :as auth]
-            [clojure.test :refer [deftest testing is are]]
+            [clojure.test :refer [deftest testing is are use-fixtures]]
             [clojure.edn :as edn]
             [bones.http.service :as service]
             [peridot.core :as p]
@@ -9,9 +9,39 @@
             [clj-time.core :as t]
             [clj-time.format :as tf]
             [byte-streams :as bs]
-            [ring.mock.request :refer (request) :rename {request mock-request}]
             [bones.http.handlers :as handlers]
+            [clojure.tools.logging.impl :as impl]
+            [clojure.java.io :as io]
+            [clojure.tools.logging :refer [*logger-factory*]]
             [clojure.spec :as s]))
+
+
+
+;; start logger stub
+(def ^{:dynamic true} *entries* (atom []))
+
+(defn test-factory [enabled-set]
+  (reify impl/LoggerFactory
+    (name [_] "test factory")
+    (get-logger [_ log-ns]
+      (reify impl/Logger
+        (enabled? [_ level] (contains? enabled-set level))
+        (write! [_ lvl ex msg]
+          (swap! *entries* conj [(str log-ns) lvl ex msg]))))))
+
+(use-fixtures :once
+  (fn [f]
+    (binding [*logger-factory*
+              (test-factory #{:trace :debug :info :warn :error :fatal})]
+      (f))))
+
+(use-fixtures :each
+  (fn [f]
+    (f)
+    (swap! *entries* (constantly []))))
+;; end logger stub
+
+
 
 ;; start example implementation
 
@@ -53,8 +83,9 @@
   {:message (str "Hello" (:first-name args))})
 (defn what [args auth-info req] args)
 (defn where [args auth-info req]
-  (if (= 5 (:room-no args))
-    (throw (ex-info "occupied" {:status 422 :message "room is occupied"}))
+  (condp = (:room-no args)
+    5 (throw (ex-info "occupied" {:status 422 :message "room is occupied"}))
+    9 (throw (ex-info "Server Error" {:status 500 :message "hello" :explosion 'oops}))
     "room granted"))
 
 (s/def ::first-name string?)
@@ -262,11 +293,17 @@
   (testing "empty body"
     (are [t v] (= t v)
       "(not (map? \"\"))" (:body (post-command ""))))
-  (testing "throwing exception"
+  (testing "throwing exception intentionally for a status response"
     (let [response (post-command {:command :where :args {:room-no 5}})]
       (has response
            :status 422
-           :body "room is occupied"))))
+           :body "room is occupied")))
+  (testing "triggering an exception unintentionally"
+    ;; this writes an exception to stderr, I think, I can't prove it
+    (let [response (post-command {:command :where :args {:room-no 9}})]
+      (has response
+           :status 500
+           :body "Server Error"))))
 
 (deftest events
   (testing "format events"

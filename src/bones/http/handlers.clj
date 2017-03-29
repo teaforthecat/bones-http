@@ -14,15 +14,20 @@
             [clojure.spec :as s]
             [clojure.edn :as edn]
             [byte-streams :as bs]
+            [taoensso.timbre :as timbre :refer [log log-and-rethrow-errors]]
             [com.stuartsierra.component :as component]))
 
-(defn allow-cors [shield]
+(defn allow-cors
+  "access-control attributes for resources"
+  [shield]
   {:allow-origin (:cors-allow-origin shield)
    :allow-credentials true
    :allow-methods #{:get :post}
    :allow-headers ["Content-Type" "Authorization"]})
 
-(defn require-login [shield]
+(defn require-login
+  "access-control attributes for resources"
+  [shield]
   {:authentication-schemes [{:scheme :bones/token
                              :bones/shield shield}
                             {:scheme :bones/cookie
@@ -30,14 +35,31 @@
    ;; authorization is what returns a 401
    :authorization {:scheme :bones/authorize}})
 
-(defn handler [resource]
-  (yada/handler
-   (yada/resource resource)))
+(defn logger
+  "logs exceptions, ignoring special status(422) exceptions"
+  [ctx]
+  (if-let [error (:error ctx)]
+    (if-let [status (:status (ex-data error))]
+      nil
+      (log :error (:error ctx)))))
 
-(defn parse-schema-error [ctx]
+(defn handler
+  "common handler definition for all resources"
+  [resource]
+  (-> resource
+      (merge {:logger logger})
+      (yada/resource)
+      (yada/handler)))
+
+(defn parse-schema-error
+  "an attempt to make data specification errors friendlier"
+  [ctx]
   (->> ctx :error ex-data :errors first (apply hash-map)))
 
-(defn schema-response [param-type ctx]
+(defn schema-response
+  "note: clojure.spec errors are also rendered, this is used for the
+  coercion that yada offers from prismatic schema"
+  [param-type ctx]
   ; param-type is where the schema validation error ends up: query,body,form
   (let [schema-error (param-type (parse-schema-error ctx))
         param-error (-> ctx :error ex-data :error)]
@@ -49,14 +71,19 @@
       :else
       "there was an error parsing the request")))
 
-(defn bad-request-response [param-type]
+(defn bad-request-response
+  "response functions for known request problems"
+  [param-type]
   {400 {
         :produces "application/edn"
         :response (partial schema-response param-type)}
    401 {:produces "application/edn"
         :response "not authorized"}
    422 {:produces  "application/edn"
-        :response (fn [ctx] (-> ctx :error ex-data :message))}})
+        :response (fn [ctx] (-> ctx :error ex-data :message))}
+   ;; exceptions will be logged
+   500 {:produces "text/plain"
+        :response "Server Error"}})
 
 (defmethod yada.authorization/validate
   :bones/authorize
@@ -70,10 +97,10 @@
 
 (defn command-response [ctx]
   (let [{:keys [parameters authentication request]} ctx
-        body (:body parameters)
-        ;; yada won't parse body if if the Content-Length header is not provided
+        _body (:body parameters)
+        ;; yada won't parse body if the Content-Length header is not provided
         ;; we could require it, but we can also fall back to parsing it ourselves
-        body (or body (edn/read-string (bs/to-string (:body (:request ctx)))))]
+        body (or _body (edn/read-string (bs/to-string (:body (:request ctx)))))]
     (if-let [errors (commands/check body)]
       (assoc (:response ctx) :status 400 :body errors)
       (commands/command body authentication request))))
@@ -107,10 +134,11 @@
 
 (defn query-response [query-fn query-spec]
   (fn [{:keys [parameters authentication request] :as ctx}]
-    (let [query ((fnil keywordize-keys {}) (:query parameters))]
-      (if (s/valid? query-spec query)
-        (query-fn (s/conform query-spec query) authentication request)
-        (assoc (:response ctx) :status 400 :body (s/explain-data query-spec query))))))
+    (log-and-rethrow-errors
+     (let [query ((fnil keywordize-keys {}) (:query parameters))]
+       (if (s/valid? query-spec query)
+         (query-fn (s/conform query-spec query) authentication request)
+         (assoc (:response ctx) :status 400 :body (s/explain-data query-spec query)))))))
 
 (defn query-handler [query-spec query-fn shield]
   (handler {:id :bones/query
@@ -142,21 +170,20 @@
                                                      :expires (to-date (t/now))}})))
 
 (defn handle-error [ctx]
-  ;; bare minimum to show it
-  (pr-str (:error ctx)))
+  "Server Error")
 
 (defn login-response [login-fn login-spec shield]
   (fn [{:keys [parameters request] :as ctx}]
-    (let [body (:body parameters)]
-      (if-let [result (login-fn body request)]
-        (:response (encrypt-response shield ctx result))
-        (assoc (:response ctx) :status 401 :body "invalid credentials")))))
+    (log-and-rethrow-errors
+     (let [body (:body parameters)]
+       (if-let [result (login-fn body request)]
+         (:response (encrypt-response shield ctx result))
+         (assoc (:response ctx) :status 401 :body "invalid credentials"))))))
 
 (defn login-handler [login-spec login-fn shield]
   (handler {:id :bones/login
             :access-control (allow-cors shield)
             :responses {500 {:produces "text/plain"
-                             ;; TODO: don't do this in production
                              :response handle-error}}
             :methods {:post
                       {:response (login-response login-fn login-spec shield)
@@ -166,11 +193,12 @@
 
 (defn logout-response [logout-fn shield]
   (fn [ctx]
-    (let [body (logout-fn (:request ctx))]
-      (-> ctx
-          (assoc-in [:response :body] body)
-          (unset-cookie shield)
-          :response))))
+    (log-and-rethrow-errors
+     (let [body (logout-fn (:request ctx))]
+       (-> ctx
+           (assoc-in [:response :body] body)
+           (unset-cookie shield)
+           :response)))))
 
 (defn logout-handler [logout-fn shield]
   (handler
@@ -189,7 +217,6 @@
 
 (defn format-event [{:keys [event data id] :as datum :or {data datum}}]
   ;; allows map of sse keys or just anything as data to be str'd
-  ;; todo: do non-integer id's break the client?
   ;; note: a map with :event or :id keys, without :data, may not be what you want
   ;; note: in this order, it doesn't matter if the data is already a string that
   ;;   ends with a newline because _at least_ one blank line separates events
