@@ -136,3 +136,7 @@
                                :cookie-attrs {:http-only false
                                               :secure cookie-https-only
                                               :max-age cookie-max-age}})))))
+
+(defmethod clojure.core/print-method Shield
+  [system ^java.io.Writer writer]
+  (.write writer "#<bones.http.auth/Shield>"))

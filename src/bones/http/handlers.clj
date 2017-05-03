@@ -331,3 +331,8 @@
 
 (defn app [handlers shield]
   (make-handler (routes handlers shield)))
+
+
+(defmethod clojure.core/print-method App
+  [system ^java.io.Writer writer]
+  (.write writer "#<bones.http.handlers/App>"))
