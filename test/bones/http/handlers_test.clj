@@ -10,6 +10,8 @@
             [clj-time.format :as tf]
             [byte-streams :as bs]
             [bones.http.handlers :as handlers]
+            [bidi.ring :refer [make-handler]]
+            [bidi.bidi :refer [match-route]]
             [clojure.tools.logging.impl :as impl]
             [clojure.java.io :as io]
             [clojure.tools.logging :refer [*logger-factory*]]
@@ -184,6 +186,14 @@
 ;; end helpers
 
 ;; start tests
+(deftest routes
+  (let [routes-vec (handlers/routes test-handlers shield)
+        combined-routes (handlers/combine-routes routes-vec (handlers/default-extra-route))
+        test-fn #(get-in (match-route combined-routes %) [:handler :id])]
+    (are [route-id path] (= route-id (test-fn path))
+      :bones/command "/api/command"
+      :bones/not-found "/api/nothing"
+      :bones/not-found "/nothing")))
 
 (deftest commands
   (let [app (new-app)
@@ -193,13 +203,22 @@
          :body "((:who :bones.http.handlers-test/who) (:what :bones.http.handlers-test/what) (:where :bones.http.handlers-test/where))\n")))
 
 (deftest not-found
-  (let [app (new-app)
-        response (GET (new-app) "/api/nothing" {} {})]
-    (has response
-         :status 404
-         ;; note: json?-what?
-         :headers {"content-length" "9", "content-type" "application/json"}
-         :body "not found")))
+  (testing "default extra routes"
+    (let [app (new-app)
+          response (GET (new-app) "/nothing" {} {})]
+      (has response
+           :status 404
+           ;; note: json?-what?
+           :headers {"content-length" "9", "content-type" "application/json"}
+           :body "not found")))
+  (testing "not found path under mount-path"
+    (let [app (new-app)
+          response (GET (new-app) "/api/nothing" {} {})]
+      (has response
+           :status 404
+           ;; note: json?-what?
+           :headers {"content-length" "9", "content-type" "application/json"}
+           :body "not found"))))
 
 (deftest query
   (testing "valid params"
