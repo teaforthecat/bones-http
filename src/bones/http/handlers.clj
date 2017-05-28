@@ -320,30 +320,17 @@
        (not-found-handler)
        :bones/not-found]]]))
 
-(defn combine-routes [conf-handlers conf-routes]
-  [true [conf-handlers
-         conf-routes]])
-
-(defn default-extra-route []
-  [true
-   (not-found-handler)
-   :bones/not-found])
-
 (defrecord App [conf shield]
   component/Lifecycle
   (start [cmp]
     (let [handlers (get-in cmp [:conf :bones.http/handlers])
-          auth-shield (:shield cmp)
-          conf-routes (get-in cmp [:conf :bones.http/routes]
-                              (default-extra-route))
-          conf-handlers (routes handlers auth-shield)]
-      (assoc cmp :routes (combine-routes conf-handlers conf-routes))))
+          auth-shield (:shield cmp)]
+      (assoc cmp :routes (routes handlers auth-shield))))
   (stop [cmp]
     (assoc cmp :routes nil)))
 
 (defn app [handlers shield]
-  (make-handler (combine-routes (routes handlers shield)
-                                (default-extra-route))))
+  (make-handler (routes handlers shield)))
 
 
 (defmethod clojure.core/print-method App

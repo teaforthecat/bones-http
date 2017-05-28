@@ -193,22 +193,13 @@
          :body "((:who :bones.http.handlers-test/who) (:what :bones.http.handlers-test/what) (:where :bones.http.handlers-test/where))\n")))
 
 (deftest not-found
-  (testing "default extra routes"
-    (let [app (new-app)
-          response (GET (new-app) "/nothing" {} {})]
-      (has response
-           :status 404
-           ;; note: json?-what?
-           :headers {"content-length" "9", "content-type" "application/json"}
-           :body "not found")))
-  (testing "not found path under mount-path"
-    (let [app (new-app)
-          response (GET (new-app) "/api/nothing" {} {})]
-      (has response
-           :status 404
-           ;; note: json?-what?
-           :headers {"content-length" "9", "content-type" "application/json"}
-           :body "not found"))))
+  (let [app (new-app)
+        response (GET (new-app) "/api/nothing" {} {})]
+    (has response
+         :status 404
+         ;; note: json?-what?
+         :headers {"content-length" "9", "content-type" "application/json"}
+         :body "not found")))
 
 (deftest query
   (testing "valid params"
