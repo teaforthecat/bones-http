@@ -2,6 +2,7 @@
   (:require [bones.http.commands :as commands]
             [ring.middleware.params :as params]
             [clojure.walk :refer [keywordize-keys]]
+            [clojure.string :refer [replace]]
             [aleph.http :as ahttp]
             [yada.handler]
             [manifold.stream :as ms]
@@ -285,7 +286,7 @@
                 query
                 event-stream
                 mount-path]
-         :or {mount-path "api"
+         :or {mount-path "/api"
               logout (fn [req] "")}} req-handlers]
     [mount-path
      [
@@ -321,9 +322,12 @@
        (not-found-handler)
        :bones/not-found]]]))
 
-(defn combine-routes [conf-handlers conf-routes]
-  ["/" [conf-handlers
-        conf-routes]])
+(defn combine-routes [cqrs-routes conf-routes]
+  ;; bidi route require a root slash at start of branching
+  ;; it is a little more pleasing to supply the leading slash in the api
+  (let [without-slash (update cqrs-routes 0 replace #"^/" "")]
+    ["/" [without-slash
+          conf-routes]]))
 
 (defn default-extra-route []
   [true
@@ -337,8 +341,8 @@
           auth-shield (:shield cmp)
           conf-routes (get-in cmp [:conf :bones.http/routes]
                               (default-extra-route))
-          conf-handlers (routes handlers auth-shield)]
-      (assoc cmp :routes (combine-routes conf-handlers conf-routes))))
+          cqrs-routes (routes handlers auth-shield)]
+      (assoc cmp :routes (combine-routes cqrs-routes conf-routes))))
   (stop [cmp]
     (assoc cmp :routes nil)))
 
