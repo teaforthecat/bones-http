@@ -2,7 +2,7 @@
   (:require [bones.http.commands :as commands]
             [ring.middleware.params :as params]
             [clojure.walk :refer [keywordize-keys]]
-            [clojure.string :refer [replace]]
+            [clojure.string :as cs]
             [aleph.http :as ahttp]
             [yada.handler]
             [manifold.stream :as ms]
@@ -13,7 +13,7 @@
             [clj-time.core :as t]
             [clj-time.coerce :refer (to-date)]
             [schema.core :as schema]
-            [clojure.spec :as s]
+            [clojure.spec.alpha :as s]
             [clojure.edn :as edn]
             [byte-streams :as bs]
             [taoensso.timbre :as timbre :refer [log log-and-rethrow-errors]]
@@ -59,7 +59,7 @@
   (->> ctx :error ex-data :errors first (apply hash-map)))
 
 (defn schema-response
-  "note: clojure.spec errors are also rendered, this is used for the
+  "note: clojure.spec.alpha errors are also rendered, this is used for the
   coercion that yada offers from prismatic schema"
   [param-type ctx]
   ; param-type is where the schema validation error ends up: query,body,form
@@ -325,7 +325,7 @@
 (defn combine-routes [cqrs-routes conf-routes]
   ;; bidi route require a root slash at start of branching
   ;; it is a little more pleasing to supply the leading slash in the api
-  (let [without-slash (update cqrs-routes 0 replace #"^/" "")]
+  (let [without-slash (update cqrs-routes 0 cs/replace #"^/" "")]
     ["/" [without-slash
           conf-routes]]))
 

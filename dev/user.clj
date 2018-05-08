@@ -1,6 +1,6 @@
 (ns user
   (require [clojure.core.async :as a]
-           [clojure.spec :as s]
+           [clojure.spec.alpha :as s]
            [manifold.stream :as ms]
            [bones.http :as http])
   (:require [buddy.auth.protocols :as proto]))

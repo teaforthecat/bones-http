@@ -3,7 +3,7 @@
   :url "https://github.com/teaforthecat/bones-http"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.9.0-alpha14"]
+  :dependencies [[org.clojure/clojure "1.9.0"]
                  [com.stuartsierra/component "0.3.2"]
                  [buddy/buddy-auth "1.4.1"]
                  [buddy/buddy-hashers "1.2.0"]

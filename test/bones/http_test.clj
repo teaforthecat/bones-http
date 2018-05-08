@@ -2,7 +2,7 @@
   (:require [bones.http :as http]
             [clojure.test :refer [deftest testing is]]
             [com.stuartsierra.component :as component]
-            [clojure.spec :as s]))
+            [clojure.spec.alpha :as s]))
 
 (s/def ::any-q map?)
 (s/def ::abc string?)
