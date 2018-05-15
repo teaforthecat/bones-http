@@ -323,11 +323,13 @@
        :bones/not-found]]]))
 
 (defn combine-routes [cqrs-routes conf-routes]
-  ;; bidi route require a root slash at start of branching
-  ;; it is a little more pleasing to supply the leading slash in the api
-  (let [without-slash (update cqrs-routes 0 cs/replace #"^/" "")]
-    ["/" [without-slash
-          conf-routes]]))
+  ["" [cqrs-routes
+       conf-routes ;;["/something" (handler)]
+       ;; doubled up for convenience, so the user does not have to worry about it
+       ;; either way
+       [true ;; catch-all
+        (not-found-handler)
+        :bones/not-found]]])
 
 (defn default-extra-route []
   [true

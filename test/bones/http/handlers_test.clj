@@ -7,6 +7,8 @@
             [clojure.tools.logging.impl :as impl]
             [bidi.bidi :refer [match-route]]
             [bidi.ring :refer [make-handler]]
+            [yada.resources.classpath-resource :as yr]
+            [yada.yada :refer [yada]]
             [bones.http.auth :as auth]
             [bones.http.handlers :as handlers]
             [bones.http.service :as service]
@@ -185,13 +187,29 @@
 
 ;; start tests
 (deftest routes
-  (let [routes-vec (handlers/routes test-handlers shield)
-        combined-routes (handlers/combine-routes routes-vec (handlers/default-extra-route))
-        test-fn #(get-in (match-route combined-routes %) [:handler :id])]
-    (are [route-id path] (= route-id (test-fn path))
-      :bones/command "/api/command"
-      :bones/not-found "/api/nothing"
-      :bones/not-found "/nothing")))
+  (testing "default routes"
+    (let [routes-vec (handlers/routes test-handlers shield)
+          combined-routes (handlers/combine-routes routes-vec (handlers/default-extra-route))
+          test-fn #(get-in (match-route combined-routes %) [:handler :id])]
+      (are [route-id path] (= route-id (test-fn path))
+        :bones/command "/api/command"
+        :bones/not-found "/api/nothing"
+        :bones/not-found "/nothing")))
+  (testing "user defined routes"
+    (let [routes-vec (handlers/routes test-handlers shield)
+          ;; struggling to route "/" to index.html
+          conf-routes ["/public" (yada
+                                  (assoc
+                                   (yr/new-classpath-resource
+                                    "public" {:index-files ["index.html"]})
+                                   :id :bones/public))]
+          combined-routes (handlers/combine-routes routes-vec conf-routes)
+          test-fn #(get-in (match-route combined-routes %) [:handler :id])]
+      (are [route-id path] (= route-id (test-fn path))
+        :bones/command "/api/command"
+        :bones/not-found "/api/nothing"
+        :bones/not-found "/arst"
+        :bones/public "/public"))))
 
 (deftest commands
   (let [app (new-app)
