@@ -5,9 +5,9 @@
             [clojure.spec.alpha :as s]
             [clojure.tools.logging :refer [*logger-factory*]]
             [clojure.tools.logging.impl :as impl]
-            [bidi.bidi :refer [match-route]]
+            [bidi.bidi :as bidi]
             [bidi.ring :refer [make-handler]]
-            [yada.resources.classpath-resource :as yr]
+            [manifold.stream.core] ;; workaround for a bug: class not found manifold.stream.core/IEventSource
             [yada.yada :refer [yada]]
             [bones.http.auth :as auth]
             [bones.http.handlers :as handlers]
@@ -16,11 +16,16 @@
             [clj-time.core :as t]
             [clj-time.format :as tf]
             [manifold.stream :as ms]
-            [peridot.core :as p]))
+            [peridot.core :as p]
+            [bones.http :as http]
+            [com.stuartsierra.component :as component])
+  (:import [java.io Closeable]))
+
 
 
 ;; start logger stub
 (def ^{:dynamic true} *entries* (atom []))
+
 
 (defn test-factory [enabled-set]
   (reify impl/LoggerFactory
@@ -114,8 +119,21 @@
 ;; start setup
 (def shield (.start (auth/map->Shield {:conf conf})))
 
-(defn new-app [& opts]
-  (handlers/app (merge test-handlers (apply array-map opts )) shield))
+(defn app [c]
+  (component/start
+   (handlers/->App (merge {:bones.http/handlers test-handlers}
+                          c)
+                   shield)))
+
+(defn routes [c]
+  (:routes (app c)))
+
+(defn new-app
+  ([]
+   (new-app {}))
+  ([c]
+   (make-handler (routes c))))
+
 
 (def valid-token
   ;; this token was encrypted from the login response
@@ -183,33 +201,35 @@
   `(are [k v] (= v (k ~response))
     ~@attrs))
 
+(defn handler-id [routes path]
+  (get-in (bidi/match-route routes path) [:handler :id]))
+
 ;; end helpers
 
 ;; start tests
-(deftest routes
+(deftest match-routes
   (testing "default routes"
-    (let [routes-vec (handlers/routes test-handlers shield)
-          combined-routes (handlers/combine-routes routes-vec (handlers/default-extra-route))
-          test-fn #(get-in (match-route combined-routes %) [:handler :id])]
-      (are [route-id path] (= route-id (test-fn path))
+    (let [combined-routes (routes {})]
+      (are [route-id path] (= route-id (handler-id combined-routes path))
         :bones/command "/api/command"
         :bones/not-found "/api/nothing"
-        :bones/not-found "/nothing")))
-  (testing "user defined routes"
-    (let [routes-vec (handlers/routes test-handlers shield)
-          ;; struggling to route "/" to index.html
-          conf-routes ["/public" (yada
-                                  (assoc
-                                   (yr/new-classpath-resource
-                                    "public" {:index-files ["index.html"]})
-                                   :id :bones/public))]
-          combined-routes (handlers/combine-routes routes-vec conf-routes)
-          test-fn #(get-in (match-route combined-routes %) [:handler :id])]
-      (are [route-id path] (= route-id (test-fn path))
-        :bones/command "/api/command"
-        :bones/not-found "/api/nothing"
-        :bones/not-found "/arst"
-        :bones/public "/public"))))
+        :bones/public "/nothing"
+        :bones/public "/"
+        :bones/public "/index.html")))
+  (testing "turn public routes off"
+    (let [combined-routes (routes {:bones.http/mount-public false})]
+      (is (= :bones/not-found (handler-id combined-routes "/")))
+      (is (= :bones/not-found (handler-id combined-routes "/index.html")))
+      ))
+  (testing "custom public path"
+    (let [combined-routes (routes {:bones.http/mount-public "/static"})]
+      (is (= :bones/public (handler-id combined-routes "/static")))
+      (is (= :bones/public (handler-id combined-routes "/static/index.html")))))
+  (testing "custom routes"
+    ;; it is important to remember that the data structure is a tree so the
+    ;; double vectors are required, i.e: [["/abc"
+    (let [combined-routes (routes {:bones.http/routes ["/other" [["/abc" (assoc (yada.yada/yada (atom "123")) :id :other/abc)]]]})]
+      (is (= :other/abc (handler-id combined-routes "/other/abc"))))))
 
 (deftest commands
   (let [app (new-app)
@@ -220,21 +240,28 @@
 
 (deftest not-found
   (testing "default extra routes"
-    (let [app (new-app)
-          response (GET (new-app) "/nothing" {} {})]
+    (let [app (new-app {:bones.http/not-found-response "nope."})
+          response (GET app "/nothing" {} {})]
       (has response
            :status 404
-           ;; note: json?-what?
-           :headers {"content-length" "9", "content-type" "application/json"}
-           :body "not found")))
+           :headers {"content-length" "5", "content-type" "text/plain;charset=utf-8"}
+           :body "nope.")))
   (testing "not found path under mount-path"
     (let [app (new-app)
-          response (GET (new-app) "/api/nothing" {} {})]
+          response (GET app "/api/nothing" {} {})]
       (has response
            :status 404
            ;; note: json?-what?
            :headers {"content-length" "9", "content-type" "application/json"}
            :body "not found"))))
+
+(deftest public
+  (testing "public directory is served "
+    (let [app (new-app {:bones.http/mount-public "/static/"})
+          response (GET app "/static/index.html" {} {})]
+      (has response
+           :status 200
+           :body "<html>this is a test. hi.</html>\n"))))
 
 (deftest query
   (testing "valid params"
@@ -251,23 +278,23 @@
           response (api-get app "/api/query" {:q 123})]
       (has response
            :status 400
-           :headers (secure-and {"content-length" "288", "content-type" "application/edn"})
+           :headers (secure-and {"content-length" "286", "content-type" "application/edn"})
            ;; TODO: expound
            ;; :body "#:clojure.spec.alpha{:problems ({:path [], :pred (clojure.core/fn [%] (contains? % :name)), :val {:q \"123\"}, :via [], :in []})}\n"
            )))
   (testing "with empty query defaults to empty map, which can be valid"
-    (let [app (new-app :query [map? query-handler])
+    (let [app (new-app {:bones.http/handlers {:query [map? query-handler]}})
           response (api-get app "/api/query" {})]
       (has response
            :status 200)))
   (testing "returns an empty string if given"
-    (let [app (new-app :query [map? (fn [_ _ _] "")])
+    (let [app (new-app {:bones.http/handlers {:query [map? (fn [_ _ _] "")]}})
           response (api-get app "/api/query" {})]
       (has response
            :body ""
            :status 200)))
   (testing "returns 404 when nil"
-    (let [app (new-app :query [map? (fn [_ _ _] nil)])
+    (let [app (new-app {:bones.http/handlers {:query [map? (fn [_ _ _] nil)]}})
           response (api-get app "/api/query" {})]
       (has response
            :status 404))))
@@ -281,14 +308,14 @@
       (is (contains? (:headers response) "set-cookie"))
       (is (= "token"  (re-find #"token" (:body response))))))
   (testing "returns 400 when nil"
-    (let [app (new-app :login [login-schema (fn [_ _] nil)])
+    (let [app (new-app {:bones.http/handlers {:login [login-schema (fn [_ _] nil)]}})
           response (api-post app "/api/login" {:username "abc" :password "123"})]
       (has response
            :body "invalid credentials"
            :status 401)))
   (testing "shares data from the token data via meta data"
     (let [response-data ^{:share [:roles]} {:userid "not-shared" :roles [:janitor]}
-          app (new-app :login [login-schema (fn [_ _]  response-data)])
+          app (new-app {:bones.http/handlers {:login [login-schema (fn [_ _]  response-data)]}})
           response (api-post app "/api/login" {:username "abc" :password "123"})
           body (read-string (:body response))]
       (is (= (body "share") {:roles [:janitor]})))))
@@ -337,7 +364,7 @@
            :status 422
            :body "room is occupied")))
   (testing "triggering an exception unintentionally"
-    ;; this writes an exception to stderr, I think, I can't prove it
+    ;; todo: capture stderr for this test
     (let [response (post-command {:command :where :args {:room-no 9}})]
       (has response
            :status 500
@@ -386,3 +413,30 @@
 ;;            :headers (secure-and {"Connection" "Upgrade"
 ;;                                  "Upgrade" "websocket"
 ;;                                  "Sec-Websocket-Accept" "wat"})))))
+
+
+(defmacro with-aleph
+  "Runs handler in aleph and defines url for use in body"
+  [url-bind opts & body]
+  `(let [server# (aleph.http/start-server (new-app {}) {:port 0})
+         port# (aleph.netty/port server#)
+         close# #(.close server#)
+         ~url-bind (str "http://localhost:" port#)]
+     (try
+       ~@body
+       (finally (close#)))))
+
+
+(deftest real-request-routing
+  (testing "public"
+    (let [conf {}
+          response
+          (with-aleph url {}
+            (try
+              (println url)
+              @(aleph.http/get (str url "/"))
+              (catch Exception e
+                (ex-data e))))]
+      (is (= 200  (:status response)))
+      (is (= "text/html" (get-in response [:headers "content-type"])))
+      (is (= "<html>this is a test. hi.</html>\n" (slurp (:body response)))))))

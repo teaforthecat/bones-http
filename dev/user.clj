@@ -1,12 +1,21 @@
 (ns user
-  (require [clojure.core.async :as a]
-           [clojure.spec.alpha :as s]
-           [manifold.stream :as ms]
-           [bones.http :as http])
-  (:require [buddy.auth.protocols :as proto]))
+  (:require [clojure.spec.alpha :as s]
+            [manifold.stream :as ms]
+            [bones.http :as http]
+            [buddy.auth.protocols :as proto]))
 
 ;; the global reload-able system
 (def sys (atom {}))
+
+;; specs
+(s/def ::username string?)
+(s/def ::password string?)
+(s/def ::q (s/and string? not-empty))
+(s/def ::red-truck integer?)
+(s/def ::blue-truck integer?)
+(s/def ::login (s/keys :req-un [::username ::password]))
+(s/def ::query (s/keys :req-un [::q]))
+(s/def ::add-race (s/keys :req-un [::red-truck] :opt-un [::blue-truck]))
 
 ;; SSE handler
 (defn event-stream-handler [req auth-info]
@@ -24,9 +33,9 @@
 
 ;; all the commands with names and schemas
 (def commands
-  [[:add-race {:red-truck s/Int
-               :blue-truck (s/maybe s/Int)}
-    add-race]])
+  [[:add-race
+    ::add-race
+    'add-race]])
 
 ;; login handler
 (defn login [args req]
@@ -37,14 +46,15 @@
 
 ;; put it all together
 (defn start []
-  (http/build-system sys {:http/handlers {:login [{:username s/Str :password s/Str} login]
+  (http/build-system sys {::http/handlers {:login [::login login]
                                           :commands commands
-                                          :query [{:q s/Any} (fn [args auth-info req]
+                                          :query [::query (fn [args auth-info req]
                                                                [args auth-info])]
                                           :event-stream event-stream-handler}
-                          :http/auth {:secret "CypOW2ZYqvB42ahTI9GdXZ5v4sphlwdC"
+                          ;; ::http/mount-public "/" ;;default
+                          ::http/auth {:secret "CypOW2ZYqvB42ahTI9GdXZ5v4sphlwdC"
                                       :allow-origin "http://localhost:3449"}
-                          :http/service {:port 8080}})
+                          ::http/service {:port 8080}})
   (http/start sys))
 
 (defn stop []
@@ -57,6 +67,10 @@
 
   ; After starting the webserver by evaluating `(start)', these commands can be pasted into a terminal to see the output
 
+
+  ;;### static files
+  ;;   $ curl localhost:8080/
+  ;; This is a test. hi.
 
   ;;### login request
   ;;    $ curl localhost:8080/api/login -v -H "Content-Type: application/edn" -d '{:username "hi" :anything true}'

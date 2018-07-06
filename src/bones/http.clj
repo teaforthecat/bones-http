@@ -54,6 +54,7 @@
                     (assoc :shield (component/using (auth/map->Shield {}) [:conf]) )
                     (assoc :routes (component/using (handlers/map->App {})
                                                     [:conf :shield]))
+                    ;; todo rename to keys to match records
                     (assoc :http   (component/using (service/map->Server {}) [:conf :routes])))))
 
 (defn start-system [system & components]
