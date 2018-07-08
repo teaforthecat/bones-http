@@ -7,17 +7,12 @@
                  [com.stuartsierra/component "0.3.2"]
                  [buddy/buddy-auth "1.4.1"]
                  [buddy/buddy-hashers "1.2.0"]
-                 [aleph "0.4.2-alpha12"]
-                 ;; [yada/lean "1.2.1"]
-                 ;; [yada "1.2.13"]
                  [yada/lean "1.2.13"]
-                 ;; ?? not included anymore?
-                 [manifold "0.1.7-alpha5"]
-                 ;; [manifold "0.1.6-alpha4"]
                  [bidi "2.0.16"]
-                 [com.taoensso/timbre "4.8.0"]
-                 ]
+                 [com.taoensso/timbre "4.8.0"]]
 
-  :profiles {:dev {:dependencies [[peridot "0.4.4"]]}}
+  :profiles {:dev {:dependencies [[peridot "0.4.4"]]
+                   :resource-paths ["test/resources"]
+                   }}
 
   )
