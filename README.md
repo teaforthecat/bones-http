@@ -3,7 +3,7 @@
 
 bones.http is a CQRS implementation built on
 [yada](https://github.com/juxt/yada). It offers authentication with Buddy and
-validation with clojure.spec.alpha. It has the goal of a slim API to make getting
+validation with clojure.spec. It has the goal of a slim API to make getting
 started as easy as possible. For a quick implementation example see
 [dev/user.clj](dev/user.clj).
 
@@ -15,8 +15,9 @@ Lets say we have a function that writes data to a database, and we want to
 connect it to the web.
 
 We can do this by creating a bones command handler. This is a function that
-takes three arguments. The first is a clojure.spec.alpha-defined map. The second is also a
-map, and contains identification information gathered from the request.
+takes three arguments. The first is a clojure.spec-defined map. The second is also a
+map, and contains identification information gathered from the request. The
+third is the whole request.
 
 Here is a contrived example:
 ```clojure
@@ -216,7 +217,8 @@ as:
        source
        #({:event "test" :id % :data (* 2 %)}))))
 ```
-_note: if using [bones.client](https://github.com/teaforthecat/bones-client), event types are not supported_
+_note: if using [bones.client](https://github.com/teaforthecat/bones-client),
+event types are not supported (see teaforthecat/bones-client#2)_
 
 ## WebSocket
 
