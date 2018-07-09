@@ -1,26 +1,25 @@
 (ns bones.http.handlers-test
-  (:require [bones.http.handlers :as handlers]
+  (:require [bidi.bidi :as bidi]
+            [bidi.ring :refer [make-handler]]
+            [bones.http :as http]
             [bones.http.auth :as auth]
-            [clojure.test :refer [deftest testing is are use-fixtures]]
-            [clojure.edn :as edn]
-            [bones.http.service :as service]
-            [peridot.core :as p]
-            [manifold.stream :as ms]
+            [bones.http.handlers :as handlers]
+            [byte-streams :as bs]
             [clj-time.core :as t]
             [clj-time.format :as tf]
-            [byte-streams :as bs]
-            [bones.http.handlers :as handlers]
-            [bidi.ring :refer [make-handler]]
-            [bidi.bidi :refer [match-route]]
-            [clojure.tools.logging.impl :as impl]
-            [clojure.java.io :as io]
+            [clojure.spec.alpha :as s]
+            [clojure.string :as cs]
+            [clojure.test :refer [are deftest is testing use-fixtures]]
             [clojure.tools.logging :refer [*logger-factory*]]
-            [clojure.spec :as s]))
-
-
+            [clojure.tools.logging.impl :as impl]
+            [com.stuartsierra.component :as component]
+            [manifold.stream :as ms]
+            [peridot.core :as p]
+            [yada.yada :refer [yada]]))
 
 ;; start logger stub
 (def ^{:dynamic true} *entries* (atom []))
+
 
 (defn test-factory [enabled-set]
   (reify impl/LoggerFactory
@@ -114,8 +113,21 @@
 ;; start setup
 (def shield (.start (auth/map->Shield {:conf conf})))
 
-(defn new-app [& opts]
-  (handlers/app (merge test-handlers (apply array-map opts )) shield))
+(defn app [c]
+  (component/start
+   (handlers/->App (merge {:bones.http/handlers test-handlers}
+                          c)
+                   shield)))
+
+(defn routes [c]
+  (:routes (app c)))
+
+(defn new-app
+  ([]
+   (new-app {}))
+  ([c]
+   (make-handler (routes c))))
+
 
 (def valid-token
   ;; this token was encrypted from the login response
@@ -183,17 +195,35 @@
   `(are [k v] (= v (k ~response))
     ~@attrs))
 
+(defn handler-id [routes path]
+  (get-in (bidi/match-route routes path) [:handler :id]))
+
 ;; end helpers
 
 ;; start tests
-(deftest routes
-  (let [routes-vec (handlers/routes test-handlers shield)
-        combined-routes (handlers/combine-routes routes-vec (handlers/default-extra-route))
-        test-fn #(get-in (match-route combined-routes %) [:handler :id])]
-    (are [route-id path] (= route-id (test-fn path))
-      :bones/command "/api/command"
-      :bones/not-found "/api/nothing"
-      :bones/not-found "/nothing")))
+(deftest match-routes
+  (testing "default routes"
+    (let [combined-routes (routes {})]
+      (are [route-id path] (= route-id (handler-id combined-routes path))
+        :bones/command "/api/command"
+        :bones/not-found "/api/nothing"
+        :bones/public "/nothing"
+        :bones/public "/"
+        :bones/public "/index.html")))
+  (testing "turn public routes off"
+    (let [combined-routes (routes {:bones.http/mount-public false})]
+      (is (= :bones/not-found (handler-id combined-routes "/")))
+      (is (= :bones/not-found (handler-id combined-routes "/index.html")))
+      ))
+  (testing "custom public path"
+    (let [combined-routes (routes {:bones.http/mount-public "/static"})]
+      (is (= :bones/public (handler-id combined-routes "/static")))
+      (is (= :bones/public (handler-id combined-routes "/static/index.html")))))
+  (testing "custom routes"
+    ;; it is important to remember that the data structure is a tree so the
+    ;; double vectors are required, i.e: [["/abc"
+    (let [combined-routes (routes {:bones.http/routes ["/other" [["/abc" (assoc (yada.yada/yada (atom "123")) :id :other/abc)]]]})]
+      (is (= :other/abc (handler-id combined-routes "/other/abc"))))))
 
 (deftest commands
   (let [app (new-app)
@@ -204,21 +234,28 @@
 
 (deftest not-found
   (testing "default extra routes"
-    (let [app (new-app)
-          response (GET (new-app) "/nothing" {} {})]
+    (let [app (new-app {:bones.http/not-found-response "nope."})
+          response (GET app "/nothing" {} {})]
       (has response
            :status 404
-           ;; note: json?-what?
-           :headers {"content-length" "9", "content-type" "application/json"}
-           :body "not found")))
+           :headers {"content-length" "5", "content-type" "text/plain;charset=utf-8"}
+           :body "nope.")))
   (testing "not found path under mount-path"
     (let [app (new-app)
-          response (GET (new-app) "/api/nothing" {} {})]
+          response (GET app "/api/nothing" {} {})]
       (has response
            :status 404
            ;; note: json?-what?
            :headers {"content-length" "9", "content-type" "application/json"}
            :body "not found"))))
+
+(deftest public
+  (testing "public directory is served "
+    (let [app (new-app {:bones.http/mount-public "/static/"})
+          response (GET app "/static/index.html" {} {})]
+      (has response
+           :status 200
+           :body "<html>this is a test. hi.</html>\n"))))
 
 (deftest query
   (testing "valid params"
@@ -235,21 +272,24 @@
           response (api-get app "/api/query" {:q 123})]
       (has response
            :status 400
-           :headers (secure-and {"content-length" "100", "content-type" "application/edn"})
-           :body "#:clojure.spec{:problems ({:path [], :pred (contains? % :name), :val {:q \"123\"}, :via [], :in []})}\n")))
+           ;; content-length is indeterminate between 286 and 288(?)
+           ;; :headers (secure-and {"content-length" "286", "content-type" "application/edn"})
+           ;; TODO: expound
+           ;; :body "#:clojure.spec.alpha{:problems ({:path [], :pred (clojure.core/fn [%] (contains? % :name)), :val {:q \"123\"}, :via [], :in []})}\n"
+           )))
   (testing "with empty query defaults to empty map, which can be valid"
-    (let [app (new-app :query [map? query-handler])
+    (let [app (new-app {:bones.http/handlers {:query [map? query-handler]}})
           response (api-get app "/api/query" {})]
       (has response
            :status 200)))
   (testing "returns an empty string if given"
-    (let [app (new-app :query [map? (fn [_ _ _] "")])
+    (let [app (new-app {:bones.http/handlers {:query [map? (fn [_ _ _] "")]}})
           response (api-get app "/api/query" {})]
       (has response
            :body ""
            :status 200)))
   (testing "returns 404 when nil"
-    (let [app (new-app :query [map? (fn [_ _ _] nil)])
+    (let [app (new-app {:bones.http/handlers {:query [map? (fn [_ _ _] nil)]}})
           response (api-get app "/api/query" {})]
       (has response
            :status 404))))
@@ -263,14 +303,14 @@
       (is (contains? (:headers response) "set-cookie"))
       (is (= "token"  (re-find #"token" (:body response))))))
   (testing "returns 400 when nil"
-    (let [app (new-app :login [login-schema (fn [_ _] nil)])
+    (let [app (new-app {:bones.http/handlers {:login [login-schema (fn [_ _] nil)]}})
           response (api-post app "/api/login" {:username "abc" :password "123"})]
       (has response
            :body "invalid credentials"
            :status 401)))
   (testing "shares data from the token data via meta data"
     (let [response-data ^{:share [:roles]} {:userid "not-shared" :roles [:janitor]}
-          app (new-app :login [login-schema (fn [_ _]  response-data)])
+          app (new-app {:bones.http/handlers {:login [login-schema (fn [_ _]  response-data)]}})
           response (api-post app "/api/login" {:username "abc" :password "123"})
           body (read-string (:body response))]
       (is (= (body "share") {:roles [:janitor]})))))
@@ -307,8 +347,9 @@
                                              :args {:last-name "Santiago"}})]
       (has response
            :status 400
-           :headers (secure-and {"content-length" "148", "content-type" "application/edn"})
-           :body "#:clojure.spec{:problems ({:path [], :pred (contains? % :first-name), :val {:last-name \"Santiago\"}, :via [:bones.http.handlers-test/who], :in []})}\n")))
+           :headers (secure-and {"content-length" "258", "content-type" "application/edn"})
+           ;; :body "#:clojure.spec.alpha{:problems ({:path [], :pred (contains? % :first-name), :val {:last-name \"Santiago\"}, :via [:bones.http.handlers-test/who], :in []})}\n"
+           )))
   (testing "empty body"
     (are [t v] (= t v)
       "(not (map? \"\"))" (:body (post-command ""))))
@@ -318,7 +359,7 @@
            :status 422
            :body "room is occupied")))
   (testing "triggering an exception unintentionally"
-    ;; this writes an exception to stderr, I think, I can't prove it
+    ;; todo: capture stderr for this test
     (let [response (post-command {:command :where :args {:room-no 9}})]
       (has response
            :status 500
@@ -353,17 +394,44 @@
                                  "access-control-allow-methods" "GET, POST",
                                  "access-control-allow-headers" "Content-Type, Authorization"})))))
 
-;; testing the request doesn't work because the (:request ctx) is a map, but
-;; aleph expects NettyRequest which it provides when routes are run by the aleph
-;; server, not sure how to proceed here yet
-;; (deftest websocket
-;;   (testing "get number stream"
-;;     (let [app (new-app)
-;;           response (api-get app "/api/ws" {"Connection" "Upgrade"
-;;                                            "Upgrade" "websocket"})]
-;;       (has response
-;;            :status 200
-;;            :body "0\n\n1\n\n"
-;;            :headers (secure-and {"Connection" "Upgrade"
-;;                                  "Upgrade" "websocket"
-;;                                  "Sec-Websocket-Accept" "wat"})))))
+(defmacro with-aleph
+  "Runs handler in aleph and defines url for use in body"
+  [url-bind opts & body]
+  `(let [server# (aleph.http/start-server (new-app {}) {:port 0})
+         port# (aleph.netty/port server#)
+         close# #(.close server#)
+         ~url-bind (str "http://localhost:" port#)]
+     (try
+       ~@body
+       (finally
+         ;; close false is a workaround for the websocket connection not getting
+         ;; closed properly in the test below. This just avoids an error getting
+         ;; logged to stdout.
+         (when (not (= false (:close ~opts)))
+           (close#))))))
+
+
+(deftest real-request-routing
+  (testing "public"
+    (let [conf {}
+          response
+          (with-aleph url {}
+            (try
+              @(aleph.http/get (str url "/"))
+              (catch Exception e
+                (ex-data e))))]
+      (is (= 200  (:status response)))
+      (is (= "text/html" (get-in response [:headers "content-type"])))
+      (is (= "<html>this is a test. hi.</html>\n" (slurp (:body response))))))
+    (testing "websocket"
+      (let [app (new-app)
+            ws-url #(-> % (cs/replace #"^http" "ws") (str "/api/ws"))
+            response (with-aleph url {:close false}
+                       ;; close false will leave the server open so don't do this regularly.
+                       (let [stream @(aleph.http/websocket-client
+                                      (ws-url url)
+                                      {:headers valid-token})
+                             msgs (vec (ms/stream->seq stream 1000))]
+                         (ms/close! stream)
+                         msgs))]
+        (is (= ["0" "1"] response)))))

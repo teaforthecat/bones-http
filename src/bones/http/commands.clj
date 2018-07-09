@@ -1,5 +1,5 @@
 (ns bones.http.commands
-  (:require [clojure.spec :as s]
+  (:require [clojure.spec.alpha :as s]
             [clojure.string :as string]))
 
 

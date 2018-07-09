@@ -2,9 +2,11 @@
   (:require [bones.http.commands :as commands]
             [ring.middleware.params :as params]
             [clojure.walk :refer [keywordize-keys]]
-            [clojure.string :refer [replace]]
+            [clojure.string :as cs]
             [aleph.http :as ahttp]
             [yada.handler]
+            [yada.resources.classpath-resource :as yr]
+            [yada.resources.file-resource :as fr]
             [manifold.stream :as ms]
             [manifold.deferred :as d]
             ;; [clojure.core.async :as a]
@@ -13,11 +15,12 @@
             [clj-time.core :as t]
             [clj-time.coerce :refer (to-date)]
             [schema.core :as schema]
-            [clojure.spec :as s]
+            [clojure.spec.alpha :as s]
             [clojure.edn :as edn]
             [byte-streams :as bs]
             [taoensso.timbre :as timbre :refer [log log-and-rethrow-errors]]
-            [com.stuartsierra.component :as component]))
+            [com.stuartsierra.component :as component]
+            [clojure.java.io :as io]))
 
 (defn allow-cors
   "access-control attributes for resources"
@@ -59,7 +62,7 @@
   (->> ctx :error ex-data :errors first (apply hash-map)))
 
 (defn schema-response
-  "note: clojure.spec errors are also rendered, this is used for the
+  "note: clojure.spec.alpha errors are also rendered, this is used for the
   coercion that yada offers from prismatic schema"
   [param-type ctx]
   ; param-type is where the schema validation error ends up: query,body,form
@@ -232,8 +235,9 @@
     (let [auth-info (:authentication ctx)
           req (:request ctx)
           source (event-fn req auth-info)]
-      (ms/transform (map format-event)
-                    source))))
+      #_(ms/transform (map format-event)
+                    source)
+      source)))
 
 (defn event-stream-handler [event-fn shield]
   (handler {:id :bones/event-stream
@@ -277,6 +281,13 @@
                                          "text/plain"}
                              :response "not found"}}}))
 
+
+(defmethod yada.body/render-seq "text/event-stream"
+  [source representation]
+  ;; yada's default doesn't let you set id: or event:
+  (ms/transform (map format-event)
+                source))
+
 (defn routes [req-handlers shield]
   ;; if query is nil/not given, 404 will be the response to ./query
   ;; todo what is spec for callable
@@ -289,67 +300,114 @@
          :or {mount-path "/api"
               logout (fn [req] "")}} req-handlers]
     [mount-path
-     [
-      (if commands
-        ["/command"
-         (command-handler commands shield)
-         :bones/command])
-      (if commands
-        ["/commands"
-         (command-list-handler commands)
-         :bones/commands])
-      (if query
-        ["/query"
-         (apply query-handler (conj query shield))
-         :bones/query])
-      (if login
-        ["/login"
-         (apply login-handler (conj login shield))
-         :bones/login])
-      (if login
-        ["/logout"
-         (logout-handler logout shield)
-         :bones/logout])
-      (if event-stream
-        ["/events"
-         (event-stream-handler event-stream shield)
-         :bones/event-stream])
-      (if event-stream
-        ["/ws"
-         (ws-handler event-stream shield)
-         :bones/ws])
-      [true
-       (not-found-handler)
-       :bones/not-found]]]))
+     (vec (remove nil?
+                  [
+                   (if commands
+                     ["/command"
+                      (command-handler commands shield)
+                      :bones/command])
+                   (if commands
+                     ["/commands"
+                      (command-list-handler commands)
+                      :bones/commands])
+                   (if query
+                     ["/query"
+                      (apply query-handler (conj query shield))
+                      :bones/query])
+                   (if login
+                     ["/login"
+                      (apply login-handler (conj login shield))
+                      :bones/login])
+                   (if login
+                     ["/logout"
+                      (logout-handler logout shield)
+                      :bones/logout])
+                   (if event-stream
+                     ["/events"
+                      (event-stream-handler event-stream shield)
+                      :bones/event-stream])
+                   (if event-stream
+                     ["/ws"
+                      (ws-handler event-stream shield)
+                      :bones/ws])
+                   [true ;; this could be help or links for a discover-able api
+                    (not-found-handler)
+                    :bones/not-found]]))]))
 
-(defn combine-routes [cqrs-routes conf-routes]
-  ;; bidi route require a root slash at start of branching
-  ;; it is a little more pleasing to supply the leading slash in the api
-  (let [without-slash (update cqrs-routes 0 replace #"^/" "")]
-    ["/" [without-slash
-          conf-routes]]))
-
-(defn default-extra-route []
+(defn not-found-route []
   [true
    (not-found-handler)
    :bones/not-found])
+
+(defn combine-routes [& routes]
+  ["" (vec (remove nil? routes))])
+
+(defn public
+  "serves files - not meant to serve a website because a directory(/) request
+  *redirects* to index.html rather than serving it, which is what a static file
+  server(nginx) would do. This is helpful for development."
+  [{:keys [path index-files directory]
+               :or {path "/"
+                    directory "public"
+                    index-files ["index.html"]}}]
+  (if-let [r (io/resource directory)]
+    [path
+     (assoc
+      (fr/new-directory-resource (io/as-file r)
+                                 {:index-files index-files})
+      :id :bones/public)]
+    ;; todo: log a configuration error as warning
+    #_(if (not= directory "public")
+      (warn "not mounting public directory - " directory " is not found (or is not a jar resource)"))))
+
+(defn custom-404 [{:keys [body]}]
+  (extend-protocol yada.resource/ResourceCoercion
+    nil
+    (yada.resource/as-resource [_]
+      (yada.resource/resource
+       {:summary "Nil resource"
+        :methods {}
+        :interceptor-chain [(fn [_]
+                              (throw (ex-info "" {:status 404 :body body})))]}))))
+
+(defn make-public-route [opts]
+  (cond
+    (string? opts)
+    (public {:path opts})
+    (map? opts)
+    (public opts)
+    (= true opts)
+    (public {})
+    (nil? opts)
+    nil
+    (= false opts)
+    nil
+    :default
+    ;; todo validate with spec
+    (throw "configuration error - bones.http/mount-public must be a path(string) or a map or a boolean")))
 
 (defrecord App [conf shield]
   component/Lifecycle
   (start [cmp]
     (let [handlers (get-in cmp [:conf :bones.http/handlers])
+          not-found-response (get-in cmp [:conf :bones.http/not-found-response] "not found")
+          _ (custom-404 {:body not-found-response})
           auth-shield (:shield cmp)
-          conf-routes (get-in cmp [:conf :bones.http/routes]
-                              (default-extra-route))
+          mount-public (get-in cmp [:conf :bones.http/mount-public] true)
+          public-route (make-public-route mount-public)
+          conf-routes (get-in cmp [:conf :bones.http/routes])
           cqrs-routes (routes handlers auth-shield)]
-      (assoc cmp :routes (combine-routes cqrs-routes conf-routes))))
+      (assoc cmp :routes (combine-routes cqrs-routes
+                                         conf-routes
+                                         public-route
+                                         (not-found-route)))))
   (stop [cmp]
     (assoc cmp :routes nil)))
 
-(defn app [handlers shield]
-  (make-handler (combine-routes (routes handlers shield)
-                                (default-extra-route))))
-
+(defn app [conf shield]
+  (-> (->App conf shield)
+      component/start
+      :routes))
 
 (defmethod clojure.core/print-method App
   [system ^java.io.Writer writer]

@@ -4,7 +4,7 @@
             [bones.http.handlers :as handlers]
             [bones.http.commands]
             [bones.http.service :as service]
-            [clojure.spec :as s]))
+            [clojure.spec.alpha :as s]))
 
 (s/def ::command-vec (s/cat :name keyword?  :spec keyword? :handler symbol?))
 ;; the inner spec here resets reg-op context which provides the dive into the nested vector
@@ -26,7 +26,7 @@
     (throw (ex-info (str spec "\n value: \n" value "\n does not conform to: \n" spec)
                     {
                      :spec spec
-                     :paths (->> errors :clojure.spec/problems (map :path))
+                     :paths (->> errors :clojure.spec.alpha/problems (map :path))
                      :description (s/describe spec)
                      :error errors
                      :value value
@@ -54,6 +54,7 @@
                     (assoc :shield (component/using (auth/map->Shield {}) [:conf]) )
                     (assoc :routes (component/using (handlers/map->App {})
                                                     [:conf :shield]))
+                    ;; todo rename to keys to match records
                     (assoc :http   (component/using (service/map->Server {}) [:conf :routes])))))
 
 (defn start-system [system & components]
