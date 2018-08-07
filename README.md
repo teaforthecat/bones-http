@@ -54,7 +54,7 @@ system yet.
 (require '[bones.http :as http])
 
 (def sys (atom {}))
-(http/build-system sys {:http/handlers {:commands commands})
+(http/build-system sys {::http/handlers {:commands commands})
 (http/start sys)
 ```
 
@@ -84,8 +84,8 @@ _note: you'll want to generate your own secret; see below_
 (require '[bones.http :as http])
 
 (http/stop sys) ;; if started
-(http/build-system sys {:http/handlers {:commands commands}
-                        :http/auth {:secret "CypOW2ZYqvB42ahTI9GdXZ5v4sphlwdC"})
+(http/build-system sys {::http/handlers {:commands commands}
+                        ::http/auth {:secret "CypOW2ZYqvB42ahTI9GdXZ5v4sphlwdC"})
 (http/start sys)
 ```
 
@@ -240,11 +240,11 @@ together like this:
 (def commands [[:new-widget ::widget 'new-widget]])
 (def query [::query-q query-handler])
 (def event-stream event-stream-handler)
-(http/build-system sys {:http/handlers {:commands commands
-                                        :query query
-                                        :login login
-                                        :event-stream event-stream}
-                        :http/auth {:secret "keepitsecret"}})
+(http/build-system sys {::http/handlers {:commands commands
+                                         :query query
+                                         :login login
+                                         :event-stream event-stream}
+                        ::http/auth {:secret "keepitsecret"}})
 (http/start sys)
 ```
 
